@@ -1,0 +1,117 @@
+syntax = "proto3";
+
+package etalbaas.function.v1;
+
+option go_package = "github.com/kou-etal/etalbaas/gen/go/etalbaas/function/v1;functionv1";
+
+import "google/protobuf/timestamp.proto";
+import "etalbaas/common/v1/common.proto";
+
+//getは削る。
+service FunctionService {
+  rpc CreateFunction(CreateFunctionRequest) returns (Function);
+  rpc ListFunctions(ListFunctionsRequest) returns (ListFunctionsResponse);
+  rpc DeleteFunction(DeleteFunctionRequest) returns (etalbaas.common.v1.Empty);
+}
+
+
+
+message CreateFunctionRequest {
+  string project_id = 1;
+  string name = 2;
+  string display_name = 3;
+  string image = 4;
+  ResourceConfig resources = 5;//cr
+  ExecutionConfig execution = 6;//job deployment
+  repeated TriggerConfig triggers = 7;//http event
+  map<string, string> env = 8;
+}
+
+message ResourceConfig {
+  string cpu_request = 1;
+  string memory_request = 2;
+  string cpu_limit = 3;
+  string memory_limit = 4;
+  int32 gpu = 5;
+}
+
+message ExecutionConfig {
+  ExecutionMode mode = 1;
+  JobConfig job = 2;
+  DeploymentConfig deployment = 3;
+}
+
+enum ExecutionMode {
+  EXECUTION_MODE_UNSPECIFIED = 0;
+  EXECUTION_MODE_JOB = 1;
+  EXECUTION_MODE_DEPLOYMENT = 2;
+}
+
+message JobConfig {
+  int32 timeout_seconds = 1;
+  int32 ttl_seconds_after_finished = 2;
+  int32 backoff_limit = 3;
+}
+
+message DeploymentConfig {
+  int32 min_replicas = 1;
+  int32 max_replicas = 2;
+  int32 target_concurrency = 3;
+}
+
+message TriggerConfig {
+  oneof trigger {
+    HttpTrigger http = 1;
+    S3Trigger s3 = 2;
+  }
+}
+
+message HttpTrigger {
+  string path = 1;
+  string authentication = 2; // "apikey" | "none"
+}
+
+message S3Trigger {
+  string bucket = 1;
+  string prefix = 2;
+  repeated string events = 3;
+}
+
+
+message Function {
+  string id = 1;
+  string project_id = 2;
+  string name = 3;
+  string display_name = 4;
+  string image = 5;
+  ResourceConfig resources = 6;
+  ExecutionConfig execution = 7;
+  repeated TriggerConfig triggers = 8;
+  string phase = 9;
+  string endpoint = 10;//http
+  FunctionStats stats = 11;
+  google.protobuf.Timestamp created_at = 12;
+  google.protobuf.Timestamp updated_at = 13;
+}
+
+message FunctionStats {
+  int64 total_invocations = 1;
+  int64 success_count = 2;
+  int64 error_count = 3;
+  int64 avg_duration_ms = 4;
+}
+
+message ListFunctionsRequest {
+  string project_id = 1;
+  etalbaas.common.v1.PaginationRequest pagination = 2;
+}
+
+message ListFunctionsResponse {
+  repeated Function functions = 1;
+  etalbaas.common.v1.PaginationResponse pagination = 2;
+}
+
+message DeleteFunctionRequest {
+  string function_id = 1;
+  string project_id = 2;
+}

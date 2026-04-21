@@ -1,0 +1,18 @@
+version: v2
+plugins:
+  # Go protobuf
+  - remote: buf.build/protocolbuffers/go
+    out: gen/go
+    opt: paths=source_relative
+  # Connect RPC (Go)
+  - remote: buf.build/connectrpc/go
+    out: gen/go
+    opt: paths=source_relative
+  # TypeScript data types
+  - remote: buf.build/bufbuild/es
+    out: gen/ts
+    opt: target=ts
+  # TypeScript Connect RPC client
+  - remote: buf.build/connectrpc/es
+    out: gen/ts
+    opt: target=ts

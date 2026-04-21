@@ -1,0 +1,101 @@
+syntax = "proto3";
+
+package etalbaas.project.v1;
+
+option go_package = "github.com/kou-etal/etalbaas/gen/go/etalbaas/project/v1;projectv1";
+
+import "google/protobuf/timestamp.proto";
+import "etalbaas/common/v1/common.proto";
+
+// Postgres は schema 分離前提（個別 DB Pod は立てない）。
+service ProjectService {
+  rpc CreateProject(CreateProjectRequest) returns (Project);
+  rpc ListProjects(ListProjectsRequest) returns (ListProjectsResponse);
+  rpc GetProject(GetProjectRequest) returns (Project);
+  rpc DeleteProject(DeleteProjectRequest) returns (etalbaas.common.v1.Empty);
+  rpc CreateApiKey(CreateApiKeyRequest) returns (ApiKey);
+  rpc ListApiKeys(ListApiKeysRequest) returns (ListApiKeysResponse);
+}
+
+
+
+message CreateProjectRequest {
+  string display_name = 1;
+  optional string description = 2;
+  StackConfig stack = 3;
+}
+
+message ListProjectsRequest {
+  etalbaas.common.v1.PaginationRequest pagination = 1;
+}
+
+message ListProjectsResponse {
+  repeated Project projects = 1;
+  etalbaas.common.v1.PaginationResponse pagination = 2;
+}
+
+message GetProjectRequest {
+  string project_id = 1;
+}
+
+message DeleteProjectRequest {
+  string project_id = 1;
+}
+
+
+message StackConfig {
+  PostgresConfig postgres = 1;
+  RedisConfig redis = 2;
+  bool postgrest_enabled = 3;
+}
+
+
+message PostgresConfig {
+  bool enabled = 1;
+  repeated string extensions = 2; // e.g. ["pgvector", "pgcrypto"]
+  int32 quota_gb = 3;
+}
+
+message RedisConfig {
+  bool enabled = 1;
+  int32 max_memory_mb = 2;
+}
+
+
+// id がそのままサブドメイン
+message Project {
+  string id = 1;
+  string display_name = 2;
+  optional string description = 3;
+  string phase = 4; // Pending | Provisioning | Ready | Failed
+  StackConfig stack = 5;
+  string rest_endpoint = 6;
+  string plan = 7;
+  google.protobuf.Timestamp created_at = 8;
+  google.protobuf.Timestamp updated_at = 9;
+}
+
+// API Key management
+// Storage は S3 直アクセス、API キー不要。
+message CreateApiKeyRequest {
+  string project_id = 1;
+  string name = 2;
+  string role = 3; // "anon" or "service_role"
+}
+
+message ApiKey {
+  string id = 1;
+  string project_id = 2;
+  string name = 3;
+  string role = 4;
+  string key = 5;
+  google.protobuf.Timestamp created_at = 6;
+}
+
+message ListApiKeysRequest {
+  string project_id = 1;
+}
+
+message ListApiKeysResponse {
+  repeated ApiKey api_keys = 1;
+}
