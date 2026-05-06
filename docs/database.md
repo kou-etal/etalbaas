@@ -14,20 +14,7 @@
 - **JSONB**: 構造が可変なフィールドに限定使用（trigger config, gpu config 等）
 - **マイグレーション**: golang-migrate, `deploy/migrations/meta/` に配置
 
-## ER関係
-
-```
-tenants 1──N projects
-              ├── 1──N functions
-              │        ├── 1──N invocations
-              │        └── 1──N event_history
-              ├── 1──N api_keys
-              ├── 1──N secrets_metadata
-              ├── 1──N usage_daily
-              └── 1──N platform_events
-```
-
-## スキーマ定義
+## ER図
 
 ```mermaid
 erDiagram
