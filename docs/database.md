@@ -31,6 +31,16 @@ tenants 1──N projects
 
 ```mermaid
 erDiagram
+    tenants ||--o{ projects : ""
+    projects ||--o{ functions : ""
+    projects ||--o{ api_keys : ""
+    projects ||--o{ secrets_metadata : ""
+    projects ||--o{ usage_daily : ""
+    projects ||--o{ platform_events : ""
+    functions ||--o{ invocations : ""
+    functions ||--o{ event_history : ""
+    invocations |o--o| event_history : ""
+
     tenants {
         uuid id PK "= GoTrue user_id"
         text email UK "NOT NULL"
