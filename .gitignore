@@ -24,3 +24,10 @@ out/
 
 # Logs
 *.log
+
+# Learning log
+learning-log.md
+.claude/commands/mystudy.md
+
+# Architecture (一旦除外)
+docs/architecture.md
