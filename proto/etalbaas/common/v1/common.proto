@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package etalbaas.common.v1;
+
+option go_package = "github.com/kou-etal/etalbaas/proto/gen/go/etalbaas/common/v1;commonv1";
+
+
+message PaginationRequest {
+  // Maximum number of items to return. 0 = server default (20).
+  int32 page_size = 1;
+  // Token for the next page, returned by a previous List call.
+  string page_token = 2;
+}
+
+
+message PaginationResponse {
+  // Token for the next page. Empty if no more pages.
+  string next_page_token = 1;
+}

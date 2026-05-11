@@ -29,5 +29,8 @@ out/
 learning-log.md
 .claude/commands/mystudy.md
 
+# Proto generated code
+proto/gen/
+
 # Architecture (一旦除外)
 docs/architecture.md
