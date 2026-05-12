@@ -1,0 +1,66 @@
+syntax = "proto3";
+
+package etalbaas.tenant.v1;
+
+option go_package = "github.com/kou-etal/etalbaas/proto/gen/go/etalbaas/tenant/v1;tenantv1";
+
+import "google/protobuf/timestamp.proto";
+import "etalbaas/common/v1/common.proto";
+
+//JWT検証はGW責務、GoTrue使う。フィールド変わる可能性あるからenum使わない。
+
+service TenantService {
+  // JWT の user_id から自身の情報を取得。
+  //Errors: NotFound(metaDBにデータなし)
+  rpc GetMe(GetMeRequest) returns (GetMeResponse);
+
+  // プロフィール更新（部分更新対応）。指定されたフィールドのみ更新。
+  // Errors: INVALID_ARGUMENT（全フィールド未指定）
+  rpc UpdateProfile(UpdateProfileRequest) returns (UpdateProfileResponse);
+
+  // 管理画面用Dev ユーザー一覧。(vpn経由)
+  rpc ListTenants(ListTenantsRequest) returns (ListTenantsResponse);
+
+  // TODO: アカウント削除は未実装（メタDB以降のPod/NS削除機構が未完成）
+}
+
+message Tenant {
+  // output_only
+  string id = 1;
+  // output_only
+  string email = 2;
+  string display_name = 3;
+  string avatar_url = 4;
+  // output_only. "free" | "pro" | "enterprise"
+  string plan = 5;
+  // output_only. "active" | "suspended" | "deleted"
+  string status = 6;
+  // output_only
+  google.protobuf.Timestamp created_at = 7;
+  // output_only
+  google.protobuf.Timestamp updated_at = 8;
+}
+
+message GetMeRequest {}
+
+message GetMeResponse {
+  Tenant tenant = 1;
+}
+
+message UpdateProfileRequest {
+  optional string display_name = 1;
+  optional string avatar_url = 2;
+}
+
+message UpdateProfileResponse {
+  Tenant tenant = 1;
+}
+
+message ListTenantsRequest {
+  etalbaas.common.v1.PaginationRequest pagination = 1;
+}
+
+message ListTenantsResponse {
+  repeated Tenant tenants = 1;
+  etalbaas.common.v1.PaginationResponse pagination = 2;
+}

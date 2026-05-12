@@ -99,8 +99,15 @@ erDiagram
         text mode "NOT NULL"
         text status "NOT NULL DEFAULT 'pending'"
         text error_message
-        integer duration_ms
+        integer duration_ms "Pod起動〜完了"
         text gpu_provider
+        text gpu_type "例: H100"
+        integer gpu_duration_ms "GPU実行部分のみ"
+        integer cold_start_ms "Pod起動〜ready"
+        bigint memory_peak_bytes "ピークメモリ"
+        bigint cpu_millis "CPU使用量"
+        integer retry_count "NOT NULL DEFAULT 0"
+        text trace_id "OpenTelemetry"
         timestamptz started_at
         timestamptz completed_at
         timestamptz created_at "NOT NULL DEFAULT now()"
@@ -112,10 +119,11 @@ erDiagram
         uuid function_id FK "NOT NULL"
         uuid invocation_id FK "NULL = 未実行"
         text trigger_type "NOT NULL"
-        text trigger_source "NOT NULL"
-        text status "NOT NULL DEFAULT 'delivered'"
+        jsonb trigger_data "NOT NULL DEFAULT '{}'"
+        text status "NOT NULL DEFAULT 'received'"
         integer attempt_count "NOT NULL DEFAULT 1"
-        text last_error
+        text last_error "要約のみ、最大1024文字"
+        text trace_id "OpenTelemetry"
         timestamptz created_at "NOT NULL DEFAULT now()"
     }
 
@@ -169,7 +177,7 @@ erDiagram
 | invocations | mode | `sync`, `async`, `stream` |
 | invocations | status | `pending`, `running`, `succeeded`, `failed`, `timeout`, `cancelled` |
 | event_history | trigger_type | `database_change`, `object_storage` |
-| event_history | status | `delivered`, `failed`, `retrying` |
+| event_history | status | `received`, `delivered`, `retrying`, `failed` |
 
 ## インデックス
 

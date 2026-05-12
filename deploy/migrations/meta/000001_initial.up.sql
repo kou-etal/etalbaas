@@ -117,18 +117,25 @@ CREATE TRIGGER functions_updated_at
 
 
 CREATE TABLE invocations (
-    id            uuid        PRIMARY KEY,
-    function_id   uuid        NOT NULL REFERENCES functions(id),
-    project_id    text        NOT NULL,
-    trigger_type  text        NOT NULL,
-    mode          text        NOT NULL,
-    status        text        NOT NULL DEFAULT 'pending',
-    error_message text,
-    duration_ms   integer,
-    gpu_provider  text,
-    started_at    timestamptz,
-    completed_at  timestamptz,
-    created_at    timestamptz NOT NULL DEFAULT now(),
+    id                uuid        PRIMARY KEY,
+    function_id       uuid        NOT NULL REFERENCES functions(id),
+    project_id        text        NOT NULL,
+    trigger_type      text        NOT NULL,
+    mode              text        NOT NULL,
+    status            text        NOT NULL DEFAULT 'pending',
+    error_message     text,
+    duration_ms       integer,
+    gpu_provider      text,
+    gpu_type          text,
+    gpu_duration_ms   integer,
+    cold_start_ms     integer,
+    memory_peak_bytes bigint,
+    cpu_millis        bigint,
+    retry_count       integer     NOT NULL DEFAULT 0,
+    trace_id          text,
+    started_at        timestamptz,
+    completed_at      timestamptz,
+    created_at        timestamptz NOT NULL DEFAULT now(),
 
     CONSTRAINT invocations_trigger_type_check CHECK (trigger_type IN ('http', 'database_change', 'object_storage')),
     CONSTRAINT invocations_mode_check         CHECK (mode IN ('sync', 'async', 'stream')),
@@ -145,14 +152,15 @@ CREATE TABLE event_history (
     function_id    uuid        NOT NULL REFERENCES functions(id),
     invocation_id  uuid        REFERENCES invocations(id),
     trigger_type   text        NOT NULL,
-    trigger_source text        NOT NULL,
-    status         text        NOT NULL DEFAULT 'delivered',
+    trigger_data   jsonb       NOT NULL DEFAULT '{}',
+    status         text        NOT NULL DEFAULT 'received',
     attempt_count  integer     NOT NULL DEFAULT 1,
     last_error     text,
+    trace_id       text,
     created_at     timestamptz NOT NULL DEFAULT now(),
 
     CONSTRAINT event_history_trigger_type_check CHECK (trigger_type IN ('database_change', 'object_storage')),
-    CONSTRAINT event_history_status_check       CHECK (status IN ('delivered', 'failed', 'retrying'))
+    CONSTRAINT event_history_status_check       CHECK (status IN ('received', 'delivered', 'retrying', 'failed'))
 );
 
 CREATE INDEX idx_event_history_project_created ON event_history(project_id, created_at DESC);

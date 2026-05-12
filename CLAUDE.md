@@ -4,21 +4,16 @@
 
 トークン消費を気にせず、深く考えてから回答すること。曖昧な回答より正確で網羅的な回答を優先。
 
-## Project overview
+## Architecture source of truth
 
-etalbaas - GPU対応・Self-hostable なマルチテナント BaaS（k8s ネイティブ）
-詳細設計: `docs/architecture.md` (v7.4)
+プロジェクト概要・技術スタック・設計判断の詳細は `docs/architecture.md` に集約。
+実装や設計で不明点があれば必ず architecture.md の該当セクションを読んで確認すること。
+CLAUDE.md に概要を二重管理しない。
 
-## Tech stack
+## Environment
 
-- Backend: Go + connect-go (Connect RPC)
-- API schema: Protocol Buffers (buf)
-- Orchestration: Kubernetes (CRD + Operator, kubebuilder)
-- Auth: GoTrue (Supabase fork)
-- DB: PostgreSQL + pgvector, Redis
-- Storage: AWS S3
-- Frontend: Next.js (Vercel)
-- IaC: Helm + Terraform
+- OS: Windows (Git Bash)
+- シェルコマンドのパスは `/c/etalbaas/...` 形式を使うこと（`C:\` や `cd /d` は動かない）
 
 ## Project structure
 
@@ -32,13 +27,15 @@ etalbaas/
 │       ├── tenant/v1/
 │       ├── project/v1/
 │       ├── function/v1/
-│       └── invoke/v1/
+│       ├── event/v1/
+│       └── storage/v1/
 ├── services/               # Go microservices
 │   ├── gateway/
 │   ├── tenant-user/
 │   ├── project/
 │   ├── function/
-│   └── invoke/
+│   ├── event/
+│   └── storage/
 ├── operator/               # kubebuilder Operator (planned)
 ├── dashboard/              # Next.js frontend (planned)
 ├── deploy/
@@ -80,8 +77,8 @@ etalbaas/
 ## Implementation plan
 
 1. ~~メタDB スキーマ設計~~ → `docs/database.md` + `deploy/migrations/meta/`
-2. Proto基盤 (buf.yaml, common.proto)
-3. 各ドメインProto (tenant → project → function → event → storage)
+2. ~~Proto基盤~~ (buf.yaml, buf.gen.yaml, common.proto)
+3. ~~各ドメインProto~~ (tenant, project, function, event, storage)
 4. Service共通基盤 (go.work, pkg/)
 5. Gateway
 6. Tenant User MS

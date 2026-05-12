@@ -1,0 +1,304 @@
+syntax = "proto3";
+
+package etalbaas.function.v1;
+
+option go_package = "github.com/kou-etal/etalbaas/proto/gen/go/etalbaas/function/v1;functionv1";
+
+import "google/protobuf/timestamp.proto";
+import "etalbaas/common/v1/common.proto";
+
+// FunctionService は Function の CRUD + 実行履歴参照を担当。
+// 実行系 RPC は不要:
+//   HTTP直接: Gateway → Function Pod（Function MS不要）
+//   イベント駆動: CDC/Storage → NATS → KEDA → Pod
+//   実行記録: Function Pod → NATS → invocations テーブル
+service FunctionService {
+  // Function 作成。ビルドは非同期（status: pending → building → ready）。
+  // Errors: INVALID_ARGUMENT, NOT_FOUND (project), ALREADY_EXISTS (name重複)
+  rpc CreateFunction(CreateFunctionRequest) returns (CreateFunctionResponse);
+
+  // Function 詳細。
+  // Errors: NOT_FOUND
+  rpc GetFunction(GetFunctionRequest) returns (GetFunctionResponse);
+
+  // Function 一覧（プロジェクト内）。
+  // Errors: NOT_FOUND (project)
+  rpc ListFunctions(ListFunctionsRequest) returns (ListFunctionsResponse);
+
+  // Function 更新（部分更新対応）。変更内容に応じて再ビルドが走る。
+  // name は変更不可（参照ID として安定させるため）。変更したい場合は削除して再作成。
+  // Errors: NOT_FOUND, INVALID_ARGUMENT
+  rpc UpdateFunction(UpdateFunctionRequest) returns (UpdateFunctionResponse);
+
+  // Function 削除（メタDB status 更新）。
+  // Errors: NOT_FOUND
+  rpc DeleteFunction(DeleteFunctionRequest) returns (DeleteFunctionResponse);
+
+  // 実行履歴一覧（ダッシュボード用）。
+  // Errors: NOT_FOUND (function)
+  rpc ListInvocations(ListInvocationsRequest) returns (ListInvocationsResponse);
+}
+
+message EnvVar {
+  string name = 1;
+  oneof source {
+
+    string value = 2;
+    // secrets_metadata の name を参照。Operator が Pod 起動時に k8s Secret から注入。
+    string secret_name = 3;
+  }
+}
+
+message GitSource {
+  string repo_url = 1;
+  // デフォルト: "main"
+  string branch = 2;
+  // リポジトリ内のサブパス。デフォルト: "/"
+  string subpath = 3;
+}
+
+message ZipSource {
+  // アップロード済み zip の Storage パス
+  string storage_path = 1;
+}
+
+message InlineSource {
+  // コード本体
+  string code = 1;
+  // ファイル名（拡張子でランタイム判定）例: "main.py"
+  string filename = 2;
+}
+
+message PresetRuntime {
+  // 例: "python3.11", "node20", "go1.22"
+  string preset = 1;
+  // 追加パッケージ（pip/npm 等）
+  repeated string requirements = 2;
+}
+
+message CustomRuntime {
+  string dockerfile = 1;
+}
+
+message DatabaseChangeTrigger {
+  string table = 1;
+  // "INSERT" | "UPDATE" | "DELETE"
+  repeated string events = 2;
+  // WHERE 条件（オプション）。例: "status = 'paid'"
+  optional string filter = 3;
+  // Function に渡すカラム（オプション）。空 = 全カラム。
+  repeated string include_columns = 4;
+}
+
+message ObjectStorageTrigger {
+  string bucket = 1;
+  // "ObjectCreated" | "ObjectRemoved" (S3/R2 イベント名規約に準拠)
+  repeated string events = 2;
+  // パスプレフィックスフィルタ（例: "images/"）。空 = 全オブジェクト。
+  string prefix = 3;
+}
+
+message Trigger {
+  oneof config {
+    DatabaseChangeTrigger database_change = 1;
+    ObjectStorageTrigger object_storage = 2;
+  }
+}
+
+message GpuConfig {
+  // GPU型番 (例: "H100")
+  string type = 1;
+  // GPUプロバイダ (例: "runpod")
+  string provider = 2;
+  // プロダクト種別 (例: "serverless")
+  string product = 3;
+}
+
+message Function {
+  // output_only
+  string id = 1;
+  // output_only
+  string project_id = 2;
+  // プロジェクト内一意。英数字とハイフン、3-40文字。URLパスやSDK参照に使う。
+  string name = 3;
+  // Dashboard表示用。任意文字列。
+  string display_name = 4;
+  // "heavy-job" | "heavy-deployment" | "light-deployment"
+  string kind = 5;
+  // "sync" | "async" | "stream"
+  string mode = 6;
+  oneof source {
+    GitSource git_source = 7;
+    ZipSource zip_source = 8;
+    InlineSource inline_source = 9;
+  }
+  oneof runtime {
+    PresetRuntime preset_runtime = 10;
+    CustomRuntime custom_runtime = 11;
+  }
+  // デフォルト30。上限: light-deployment=30s, heavy-*(CPUのみ)=3600s, heavy-*(GPU)=無制限
+  int32 timeout_sec = 12;
+  // NULL = GPU不使用
+  GpuConfig gpu_config = 13;
+  repeated Trigger triggers = 14;
+  repeated EnvVar env_vars = 15;
+  // output_only. "pending" | "building" | "ready" | "failed" | "deleted"
+  string status = 16;
+  // output_only
+  string build_image_ref = 17;
+  // output_only
+  string build_image_digest = 18;
+  // output_only
+  int32 build_duration_sec = 19;
+  // output_only
+  google.protobuf.Timestamp last_built_at = 20;
+  // output_only
+  google.protobuf.Timestamp created_at = 21;
+  // output_only
+  google.protobuf.Timestamp updated_at = 22;
+}
+
+// output_only（全フィールド読み取り専用）
+message Invocation {
+ 
+  string id = 1;
+  string function_id = 2;
+  string project_id = 3;
+
+  // トリガー・モード
+  // "http" | "database_change" | "object_storage"
+  string trigger_type = 4;
+  // "sync" | "async" | "stream"
+  string mode = 5;
+
+  // 実行結果
+  // "pending" | "running" | "succeeded" | "failed" | "timeout" | "cancelled"
+  string status = 6;
+  string error_message = 7;
+  // リトライ回数（初回=0）。Phase 1 では常に0（リトライ未実装）。
+  int32 retry_count = 8;
+
+  // パフォーマンスメトリクス
+  // Pod起動〜完了の全体時間
+  int32 duration_ms = 9;
+  // Pod起動〜readyの時間
+  int32 cold_start_ms = 10;
+  // GPU実行部分のみの時間。GPU不使用時は0。
+  int32 gpu_duration_ms = 11;
+  // ピークメモリ使用量（bytes）
+  int64 memory_peak_bytes = 12;
+  // CPU使用量（millicores * seconds）。usage_daily集計元。
+  int64 cpu_millis = 13;
+
+  // GPU情報（GPU不使用時は空）
+  string gpu_provider = 14;
+  string gpu_type = 15;
+
+  
+  // OpenTelemetry trace ID（Tempo連携）
+  string trace_id = 16;
+
+
+  google.protobuf.Timestamp started_at = 17;
+  google.protobuf.Timestamp completed_at = 18;
+  google.protobuf.Timestamp created_at = 19;
+}
+
+message CreateFunctionRequest {
+  string project_id = 1;
+  string name = 2;
+  string display_name = 3;
+  // "heavy-job" | "heavy-deployment" | "light-deployment"
+  string kind = 4;
+  // "sync" | "async" | "stream"
+  string mode = 5;
+  oneof source {
+    GitSource git_source = 6;
+    ZipSource zip_source = 7;
+    InlineSource inline_source = 8;
+  }
+  oneof runtime {
+    PresetRuntime preset_runtime = 9;
+    CustomRuntime custom_runtime = 10;
+  }
+  // デフォルト30。上限: light-deployment=30s, heavy-*(CPUのみ)=3600s, heavy-*(GPU)=無制限
+  int32 timeout_sec = 11;
+  GpuConfig gpu_config = 12;
+  repeated Trigger triggers = 13;
+  repeated EnvVar env_vars = 14;
+}
+
+message CreateFunctionResponse {
+  Function function = 1;
+}
+
+message GetFunctionRequest {
+  string project_id = 1;
+  string function_id = 2;
+}
+
+message GetFunctionResponse {
+  Function function = 1;
+}
+
+message ListFunctionsRequest {
+  string project_id = 1;
+  etalbaas.common.v1.PaginationRequest pagination = 2;
+}
+
+message ListFunctionsResponse {
+  repeated Function functions = 1;
+  etalbaas.common.v1.PaginationResponse pagination = 2;
+}
+
+message UpdateFunctionRequest {
+  string project_id = 1;
+  string function_id = 2;
+  optional string display_name = 3;
+  // "sync" | "async" | "stream"
+  optional string mode = 4;
+  // source 変更時は oneof ごと指定。未指定 = 変更なし。
+  oneof source {
+    GitSource git_source = 5;
+    ZipSource zip_source = 6;
+    InlineSource inline_source = 7;
+  }
+  // runtime 変更時は oneof ごと指定。未指定 = 変更なし。
+  oneof runtime {
+    PresetRuntime preset_runtime = 8;
+    CustomRuntime custom_runtime = 9;
+  }
+  // デフォルト30。上限: light-deployment=30s, heavy-*(CPUのみ)=3600s, heavy-*(GPU)=無制限
+  optional int32 timeout_sec = 10;
+  optional GpuConfig gpu_config = 11;
+  repeated Trigger triggers = 12;
+  repeated EnvVar env_vars = 13;
+}
+
+message UpdateFunctionResponse {
+  Function function = 1;
+}
+
+message DeleteFunctionRequest {
+  string project_id = 1;
+  string function_id = 2;
+}
+
+message DeleteFunctionResponse {
+  Function function = 1;
+}
+
+message ListInvocationsRequest {
+  string project_id = 1;
+  string function_id = 2;
+  // "pending" | "running" | "succeeded" | "failed" | "timeout" | "cancelled"
+  optional string status_filter = 3;
+  optional google.protobuf.Timestamp since = 4;
+  optional google.protobuf.Timestamp until = 5;
+  etalbaas.common.v1.PaginationRequest pagination = 6;
+}
+
+message ListInvocationsResponse {
+  repeated Invocation invocations = 1;
+  etalbaas.common.v1.PaginationResponse pagination = 2;
+}
