@@ -28,6 +28,7 @@ etalbaas/
 │       ├── project/v1/
 │       ├── function/v1/
 │       ├── event/v1/
+│       ├── secret/v1/
 │       └── storage/v1/
 ├── services/               # Go microservices
 │   ├── gateway/
@@ -73,6 +74,14 @@ etalbaas/
 - Branch: `<prefix>/<issue-number>-<description>`
 - Always run tests and lint before considering a task done
 - Do not auto-commit or auto-push without explicit instruction
+
+## Codex review
+
+- ファイル編集が全て完了してから、`codex review` を **1ファイルずつ** 実行する
+- 一括レビュー（`codex review --uncommitted`）は浅くなるため使わない
+- `codex exec "Review <file> thoroughly. Check: ..."` で対象ファイルとチェック観点を明示する
+- Codex のフィードバックを検討し、architecture.md の設計判断と照合した上で反映/却下を判断する
+- ユーザーに提示するのは Codex レビュー反映後
 
 ## Implementation plan
 

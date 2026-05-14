@@ -51,7 +51,9 @@ message Project {
   string id = 1;
   // output_only
   string tenant_id = 2;
+  // 最大100文字。
   string display_name = 3;
+  // 最大500文字。
   string description = 4;
   // output_only. "pending" | "provisioning" | "ready" | "paused" | "failed" | "deleted"
   string status = 5;
@@ -71,6 +73,7 @@ message ApiKey {
   string id = 1;
   // output_only
   string project_id = 2;
+  // 最大63文字。
   string name = 3;
   // output_only. 先頭8文字（表示用）
   string key_prefix = 4;
@@ -85,7 +88,9 @@ message ApiKey {
 }
 
 message CreateProjectRequest {
+  // 最大100文字。
   string display_name = 1;
+  // 最大500文字。
   string description = 2;
   bool postgres_enabled = 3;
   // 許可値: "pgvector" | "pgcrypto"
@@ -141,6 +146,7 @@ message ResumeProjectResponse {
 
 message CreateApiKeyRequest {
   string project_id = 1;
+  // 最大63文字。
   string name = 2;
   // "anon" | "service_role"
   string role = 3;

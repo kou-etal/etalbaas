@@ -20,8 +20,11 @@ CREATE TABLE tenants (
     created_at    timestamptz NOT NULL DEFAULT now(),
     updated_at    timestamptz NOT NULL DEFAULT now(),
 
-    CONSTRAINT tenants_plan_check   CHECK (plan IN ('free', 'pro', 'enterprise')),
-    CONSTRAINT tenants_status_check CHECK (status IN ('active', 'suspended', 'deleted'))
+    CONSTRAINT tenants_plan_check          CHECK (plan IN ('free', 'pro', 'enterprise')),
+    CONSTRAINT tenants_status_check        CHECK (status IN ('active', 'suspended', 'deleted')),
+    CONSTRAINT tenants_display_name_length CHECK (length(display_name) <= 100),
+    CONSTRAINT tenants_email_length        CHECK (length(email) <= 254),
+    CONSTRAINT tenants_avatar_url_length   CHECK (length(avatar_url) <= 2048)
 );
 
 CREATE TRIGGER tenants_updated_at
@@ -42,8 +45,10 @@ CREATE TABLE projects (
     created_at          timestamptz NOT NULL DEFAULT now(),
     updated_at          timestamptz NOT NULL DEFAULT now(),
 
-    CONSTRAINT projects_status_check     CHECK (status IN ('pending', 'provisioning', 'ready', 'paused', 'failed', 'deleted')),
-    CONSTRAINT projects_postgrest_check  CHECK (NOT (postgrest_enabled AND NOT postgres_enabled))
+    CONSTRAINT projects_status_check          CHECK (status IN ('pending', 'provisioning', 'ready', 'paused', 'failed', 'deleted')),
+    CONSTRAINT projects_postgrest_check       CHECK (NOT (postgrest_enabled AND NOT postgres_enabled)),
+    CONSTRAINT projects_display_name_length   CHECK (length(display_name) <= 100),
+    CONSTRAINT projects_description_length    CHECK (length(description) <= 500)
 );
 
 CREATE INDEX idx_projects_tenant_id ON projects(tenant_id);
@@ -65,8 +70,9 @@ CREATE TABLE api_keys (
     revoked_at  timestamptz,
     created_at  timestamptz NOT NULL DEFAULT now(),
 
-    CONSTRAINT api_keys_role_check CHECK (role IN ('anon', 'service_role')),
-    CONSTRAINT api_keys_project_name_unique UNIQUE (project_id, name)
+    CONSTRAINT api_keys_role_check           CHECK (role IN ('anon', 'service_role')),
+    CONSTRAINT api_keys_name_length          CHECK (length(name) <= 63),
+    CONSTRAINT api_keys_project_name_unique  UNIQUE (project_id, name)
 );
 
 CREATE INDEX idx_api_keys_key_hash   ON api_keys(key_hash) WHERE revoked_at IS NULL;
@@ -98,15 +104,17 @@ CREATE TABLE functions (
     created_at            timestamptz NOT NULL DEFAULT now(),
     updated_at            timestamptz NOT NULL DEFAULT now(),
 
-    CONSTRAINT functions_kind_check        CHECK (kind IN ('heavy-job', 'heavy-deployment', 'light-deployment')),
-    CONSTRAINT functions_mode_check        CHECK (mode IN ('sync', 'async', 'stream')),
-    CONSTRAINT functions_source_type_check CHECK (source_type IN ('git', 'zip', 'inline')),
-    CONSTRAINT functions_status_check      CHECK (status IN ('pending', 'building', 'ready', 'failed', 'deleted')),
-    CONSTRAINT functions_runtime_check     CHECK (
+    CONSTRAINT functions_kind_check            CHECK (kind IN ('heavy-job', 'heavy-deployment', 'light-deployment')),
+    CONSTRAINT functions_mode_check            CHECK (mode IN ('sync', 'async', 'stream')),
+    CONSTRAINT functions_source_type_check     CHECK (source_type IN ('git', 'zip', 'inline')),
+    CONSTRAINT functions_status_check          CHECK (status IN ('pending', 'building', 'ready', 'failed', 'deleted')),
+    CONSTRAINT functions_runtime_check         CHECK (
         (runtime_preset IS NULL AND runtime_dockerfile IS NOT NULL)
         OR (runtime_preset IS NOT NULL AND runtime_dockerfile IS NULL)
     ),
-    CONSTRAINT functions_project_name_unique UNIQUE (project_id, name)
+    CONSTRAINT functions_name_length           CHECK (length(name) <= 40),
+    CONSTRAINT functions_display_name_length   CHECK (length(display_name) <= 100),
+    CONSTRAINT functions_project_name_unique   UNIQUE (project_id, name)
 );
 
 CREATE INDEX idx_functions_project_id ON functions(project_id);
@@ -137,9 +145,10 @@ CREATE TABLE invocations (
     completed_at      timestamptz,
     created_at        timestamptz NOT NULL DEFAULT now(),
 
-    CONSTRAINT invocations_trigger_type_check CHECK (trigger_type IN ('http', 'database_change', 'object_storage')),
-    CONSTRAINT invocations_mode_check         CHECK (mode IN ('sync', 'async', 'stream')),
-    CONSTRAINT invocations_status_check       CHECK (status IN ('pending', 'running', 'succeeded', 'failed', 'timeout', 'cancelled'))
+    CONSTRAINT invocations_trigger_type_check    CHECK (trigger_type IN ('http', 'database_change', 'object_storage')),
+    CONSTRAINT invocations_mode_check            CHECK (mode IN ('sync', 'async', 'stream')),
+    CONSTRAINT invocations_status_check          CHECK (status IN ('pending', 'running', 'succeeded', 'failed', 'timeout', 'cancelled')),
+    CONSTRAINT invocations_error_message_length  CHECK (length(error_message) <= 1024)
 );
 
 CREATE INDEX idx_invocations_project_created  ON invocations(project_id, created_at DESC);
@@ -159,8 +168,9 @@ CREATE TABLE event_history (
     trace_id       text,
     created_at     timestamptz NOT NULL DEFAULT now(),
 
-    CONSTRAINT event_history_trigger_type_check CHECK (trigger_type IN ('database_change', 'object_storage')),
-    CONSTRAINT event_history_status_check       CHECK (status IN ('received', 'delivered', 'retrying', 'failed'))
+    CONSTRAINT event_history_trigger_type_check  CHECK (trigger_type IN ('database_change', 'object_storage')),
+    CONSTRAINT event_history_status_check        CHECK (status IN ('received', 'delivered', 'retrying', 'failed')),
+    CONSTRAINT event_history_last_error_length   CHECK (length(last_error) <= 1024)
 );
 
 CREATE INDEX idx_event_history_project_created ON event_history(project_id, created_at DESC);
@@ -200,11 +210,13 @@ CREATE TABLE secrets_metadata (
     id          uuid        PRIMARY KEY,
     project_id  text        NOT NULL REFERENCES projects(id),
     name        text        NOT NULL,
-    description text        DEFAULT '',
+    description text        NOT NULL DEFAULT '',
     created_at  timestamptz NOT NULL DEFAULT now(),
     updated_at  timestamptz NOT NULL DEFAULT now(),
 
-    CONSTRAINT secrets_metadata_project_name_unique UNIQUE (project_id, name)
+    CONSTRAINT secrets_metadata_name_length          CHECK (length(name) <= 64),
+    CONSTRAINT secrets_metadata_description_length   CHECK (length(description) <= 1024),
+    CONSTRAINT secrets_metadata_project_name_unique  UNIQUE (project_id, name)
 );
 
 CREATE TRIGGER secrets_metadata_updated_at

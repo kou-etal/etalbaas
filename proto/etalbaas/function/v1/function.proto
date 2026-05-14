@@ -119,9 +119,9 @@ message Function {
   string id = 1;
   // output_only
   string project_id = 2;
-  // プロジェクト内一意。英数字とハイフン、3-40文字。URLパスやSDK参照に使う。
+  // プロジェクト内一意。英数字とハイフン、3-40文字。最大40文字。URLパスやSDK参照に使う。
   string name = 3;
-  // Dashboard表示用。任意文字列。
+  // Dashboard表示用。任意文字列。最大100文字。
   string display_name = 4;
   // "heavy-job" | "heavy-deployment" | "light-deployment"
   string kind = 5;
@@ -174,6 +174,7 @@ message Invocation {
   // 実行結果
   // "pending" | "running" | "succeeded" | "failed" | "timeout" | "cancelled"
   string status = 6;
+  // 最大1024文字。フルログは Loki に trace_id で検索。
   string error_message = 7;
   // リトライ回数（初回=0）。Phase 1 では常に0（リトライ未実装）。
   int32 retry_count = 8;
@@ -206,7 +207,9 @@ message Invocation {
 
 message CreateFunctionRequest {
   string project_id = 1;
+  // 最大40文字。
   string name = 2;
+  // 最大100文字。
   string display_name = 3;
   // "heavy-job" | "heavy-deployment" | "light-deployment"
   string kind = 4;
@@ -254,6 +257,7 @@ message ListFunctionsResponse {
 message UpdateFunctionRequest {
   string project_id = 1;
   string function_id = 2;
+  // 最大100文字。
   optional string display_name = 3;
   // "sync" | "async" | "stream"
   optional string mode = 4;

@@ -179,6 +179,23 @@ erDiagram
 | event_history | trigger_type | `database_change`, `object_storage` |
 | event_history | status | `received`, `delivered`, `retrying`, `failed` |
 
+### 文字列長制約
+
+| テーブル | カラム | 上限 |
+|---------|--------|------|
+| tenants | display_name | 100 |
+| tenants | email | 254 |
+| tenants | avatar_url | 2048 |
+| projects | display_name | 100 |
+| projects | description | 500 |
+| api_keys | name | 63 |
+| functions | name | 40 |
+| functions | display_name | 100 |
+| invocations | error_message | 1024 |
+| event_history | last_error | 1024 |
+| secrets_metadata | name | 64 |
+| secrets_metadata | description | 1024 |
+
 ## インデックス
 
 | テーブル | インデックス | 条件 |

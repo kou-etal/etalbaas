@@ -27,9 +27,11 @@ service TenantService {
 message Tenant {
   // output_only
   string id = 1;
-  // output_only
+  // output_only. 最大254文字（RFC 5321）。
   string email = 2;
+  // 最大100文字。
   string display_name = 3;
+  // 最大2048文字。
   string avatar_url = 4;
   // output_only. "free" | "pro" | "enterprise"
   string plan = 5;
@@ -48,7 +50,9 @@ message GetMeResponse {
 }
 
 message UpdateProfileRequest {
+  // 最大100文字。
   optional string display_name = 1;
+  // 最大2048文字。
   optional string avatar_url = 2;
 }
 
