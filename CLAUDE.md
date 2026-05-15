@@ -8,7 +8,6 @@
 
 プロジェクト概要・技術スタック・設計判断の詳細は `docs/architecture.md` に集約。
 実装や設計で不明点があれば必ず architecture.md の該当セクションを読んで確認すること。
-CLAUDE.md に概要を二重管理しない。
 
 ## Environment
 
@@ -79,9 +78,18 @@ etalbaas/
 
 - ファイル編集が全て完了してから、`codex review` を **1ファイルずつ** 実行する
 - 一括レビュー（`codex review --uncommitted`）は浅くなるため使わない
-- `codex exec "Review <file> thoroughly. Check: ..."` で対象ファイルとチェック観点を明示する
-- Codex のフィードバックを検討し、architecture.md の設計判断と照合した上で反映/却下を判断する
-- ユーザーに提示するのは Codex レビュー反映後
+- プロンプトテンプレート:
+  ```
+  codex exec "Review <file> as a senior Go engineer.
+  Flag any anti-patterns, bugs, security risks, concurrency issues,
+  performance concerns, and API design problems.
+  Context: shared package for a multi-tenant BaaS platform
+  (connect-go RPC, k8s native, pgx, OpenTelemetry).
+  Output format: severity (high/medium/low), file:line, description."
+  ```
+- 観点を狭く列挙しない（広い網をかけてアンチパターンを拾う）
+- Codex の指摘は鵜呑みにしない。architecture.md の設計判断と照合し、根拠を持って反映/却下を判断する
+- 判断結果を表形式（指摘 / 判断 / 理由）でユーザーに提示する
 
 ## Implementation plan
 
