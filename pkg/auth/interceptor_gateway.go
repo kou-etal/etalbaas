@@ -2,9 +2,11 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	"connectrpc.com/connect"
+	"github.com/google/uuid"
 
 	"github.com/kou-etal/etalbaas/pkg/requestctx"
 )
@@ -31,15 +33,19 @@ func NewGatewayInterceptor(signingKey []byte) connect.UnaryInterceptorFunc {
 				return nil, connect.NewError(connect.CodeUnauthenticated, err)
 			}
 
-			ctx = requestctx.WithUserID(ctx, claims.UserID)
+			userID, err := uuid.Parse(claims.UserID)
+			if err != nil {
+				return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("invalid user id format in token"))
+			}
+
+			ctx = requestctx.WithUserID(ctx, userID)
 
 			resp, err := next(ctx, req)
 			if err != nil {
 				return nil, err
 			}
 
-			// 下流 MS 向けにヘッダ付加
-			resp.Header().Set(requestctx.HeaderUserID, claims.UserID)
+			resp.Header().Set(requestctx.HeaderUserID, userID.String())
 
 			return resp, nil
 		}

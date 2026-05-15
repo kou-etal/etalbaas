@@ -74,10 +74,18 @@ etalbaas/
 - Always run tests and lint before considering a task done
 - Do not auto-commit or auto-push without explicit instruction
 
+## Deferred refactoring
+
+- 横断的な変更が必要でその Step では対応しないリファクタリング項目は `REFACTOR_BACKLOG.md` に追記する
+- このファイルは `.gitignore` 済み（ローカル専用のバックログ）
+- 記載フォーマット: 見出し(問題の要約)、発見元、対象ファイル、問題の説明、対策案
+- codex review で「却下（横断的変更）」と判断した指摘は必ずここに記録する
+
 ## Codex review
 
 - ファイル編集が全て完了してから、`codex review` を **1ファイルずつ** 実行する
 - 一括レビュー（`codex review --uncommitted`）は浅くなるため使わない
+- **実行時の注意**: `codex exec "..." 2>&1` のみで実行すること。パイプ（`| grep`, `| tail`, `| head`）やリダイレクト（`> file`, `< /dev/null`）を付けると stdin の問題でハングする。並列実行も不可。必ず **1つずつ順次、パイプなし** で実行する
 - プロンプトテンプレート:
   ```
   codex exec "Review <file> as a senior Go engineer.

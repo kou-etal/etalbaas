@@ -8,14 +8,17 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	"github.com/google/uuid"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 
 	"github.com/kou-etal/etalbaas/pkg/auth"
 	"github.com/kou-etal/etalbaas/pkg/requestctx"
 )
 
+var testUserUUID = uuid.MustParse("550e8400-e29b-41d4-a716-446655440000")
+
 type capturedContext struct {
-	userID    string
+	userID    uuid.UUID
 	projectID string
 }
 
@@ -42,7 +45,7 @@ func newEchoClient(serverURL string) *connect.Client[wrapperspb.StringValue, wra
 }
 
 func TestGatewayInterceptor_ValidToken(t *testing.T) {
-	tokenStr := createTestToken(t, "user-456", time.Now().Add(time.Hour))
+	tokenStr := createTestToken(t, testUserUUID.String(), time.Now().Add(time.Hour))
 
 	interceptor := auth.NewGatewayInterceptor(testSigningKey)
 	handler, cap := newEchoHandler(interceptor)
@@ -58,8 +61,8 @@ func TestGatewayInterceptor_ValidToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cap.userID != "user-456" {
-		t.Fatalf("got user_id %q, want %q", cap.userID, "user-456")
+	if cap.userID != testUserUUID {
+		t.Fatalf("got user_id %v, want %v", cap.userID, testUserUUID)
 	}
 }
 
@@ -77,11 +80,9 @@ func TestGatewayInterceptor_MissingAuth(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for missing auth")
 	}
-	connectErr := new(connect.Error)
-	if ok := connect.CodeOf(err); ok != connect.CodeUnauthenticated {
-		t.Fatalf("got code %v, want Unauthenticated", ok)
+	if code := connect.CodeOf(err); code != connect.CodeUnauthenticated {
+		t.Fatalf("got code %v, want Unauthenticated", code)
 	}
-	_ = connectErr
 }
 
 func TestGatewayInterceptor_InvalidToken(t *testing.T) {

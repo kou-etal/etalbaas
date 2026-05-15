@@ -1,6 +1,7 @@
 package apperror_test
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -30,6 +31,13 @@ func TestWrap(t *testing.T) {
 	}
 }
 
+func TestWrapNilReturnsNil(t *testing.T) {
+	err := apperror.Wrap(apperror.CodeInternal, "should be nil", nil)
+	if err != nil {
+		t.Fatalf("Wrap(nil) should return nil, got %v", err)
+	}
+}
+
 func TestToConnectError(t *testing.T) {
 	tests := []struct {
 		code     apperror.Code
@@ -43,6 +51,8 @@ func TestToConnectError(t *testing.T) {
 		{apperror.CodeFailedPrecondition, connect.CodeFailedPrecondition},
 		{apperror.CodeResourceExhausted, connect.CodeResourceExhausted},
 		{apperror.CodeInternal, connect.CodeInternal},
+		{apperror.CodeCanceled, connect.CodeCanceled},
+		{apperror.CodeDeadlineExceeded, connect.CodeDeadlineExceeded},
 	}
 
 	for _, tt := range tests {
@@ -80,11 +90,48 @@ func TestCodeUnknown(t *testing.T) {
 	}
 }
 
-func TestToConnectErrorUsesMessageOnly(t *testing.T) {
+func TestToConnectErrorInternalMasksMessage(t *testing.T) {
 	cause := errors.New("sensitive db details")
 	appErr := apperror.Wrap(apperror.CodeInternal, "operation failed", cause)
 	connectErr := apperror.ToConnectError(appErr)
-	if connectErr.Message() != "operation failed" {
-		t.Fatalf("connect error should only contain Message, got %q", connectErr.Message())
+	if connectErr.Message() != "internal error" {
+		t.Fatalf("CodeInternal should mask message, got %q", connectErr.Message())
+	}
+}
+
+func TestToConnectErrorContextCanceled(t *testing.T) {
+	connectErr := apperror.ToConnectError(context.Canceled)
+	if connectErr.Code() != connect.CodeCanceled {
+		t.Fatalf("context.Canceled should map to CodeCanceled, got %v", connectErr.Code())
+	}
+}
+
+func TestToConnectErrorContextDeadlineExceeded(t *testing.T) {
+	connectErr := apperror.ToConnectError(context.DeadlineExceeded)
+	if connectErr.Code() != connect.CodeDeadlineExceeded {
+		t.Fatalf("context.DeadlineExceeded should map to CodeDeadlineExceeded, got %v", connectErr.Code())
+	}
+}
+
+func TestCodeOf(t *testing.T) {
+	err := apperror.New(apperror.CodeInvalidArgument, "bad input")
+	if apperror.CodeOf(err) != apperror.CodeInvalidArgument {
+		t.Fatalf("got %d, want CodeInvalidArgument", apperror.CodeOf(err))
+	}
+}
+
+func TestCodeOfNonAppError(t *testing.T) {
+	err := errors.New("random error")
+	if apperror.CodeOf(err) != apperror.CodeUnknown {
+		t.Fatalf("got %d, want CodeUnknown", apperror.CodeOf(err))
+	}
+}
+
+func TestCodeOfWrapped(t *testing.T) {
+	cause := errors.New("db error")
+	appErr := apperror.Wrap(apperror.CodeInternal, "query failed", cause)
+	wrapped := errors.Join(errors.New("context"), appErr)
+	if apperror.CodeOf(wrapped) != apperror.CodeInternal {
+		t.Fatalf("got %d, want CodeInternal", apperror.CodeOf(wrapped))
 	}
 }

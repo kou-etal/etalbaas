@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/google/uuid"
+
 	"github.com/kou-etal/etalbaas/pkg/requestctx"
 )
 
@@ -15,13 +17,14 @@ func TestSetAndGetUserID(t *testing.T) {
 		t.Fatal("expected error for empty context")
 	}
 
-	ctx = requestctx.WithUserID(ctx, "user-123")
+	id := uuid.MustParse("550e8400-e29b-41d4-a716-446655440000")
+	ctx = requestctx.WithUserID(ctx, id)
 	got, err := requestctx.UserID(ctx)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got != "user-123" {
-		t.Fatalf("got %q, want %q", got, "user-123")
+	if got != id {
+		t.Fatalf("got %v, want %v", got, id)
 	}
 }
 
@@ -43,10 +46,10 @@ func TestSetAndGetProjectID(t *testing.T) {
 	}
 }
 
-func TestEmptyStringReturnsError(t *testing.T) {
-	ctx := requestctx.WithUserID(context.Background(), "")
+func TestNilUUIDReturnsError(t *testing.T) {
+	ctx := requestctx.WithUserID(context.Background(), uuid.Nil)
 	_, err := requestctx.UserID(ctx)
 	if err == nil {
-		t.Fatal("expected error for empty string")
+		t.Fatal("expected error for nil UUID")
 	}
 }

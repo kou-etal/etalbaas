@@ -3,6 +3,8 @@ package requestctx
 import (
 	"context"
 	"errors"
+
+	"github.com/google/uuid"
 )
 
 const (
@@ -18,14 +20,14 @@ var (
 	ErrProjectIDNotFound = errors.New("project_id not found in context")
 )
 
-func WithUserID(ctx context.Context, id string) context.Context {
+func WithUserID(ctx context.Context, id uuid.UUID) context.Context {
 	return context.WithValue(ctx, userIDKey{}, id)
 }
 
-func UserID(ctx context.Context) (string, error) {
-	v, ok := ctx.Value(userIDKey{}).(string)
-	if !ok || v == "" {
-		return "", ErrUserIDNotFound
+func UserID(ctx context.Context) (uuid.UUID, error) {
+	v, ok := ctx.Value(userIDKey{}).(uuid.UUID)
+	if !ok || v == uuid.Nil {
+		return uuid.Nil, ErrUserIDNotFound
 	}
 	return v, nil
 }

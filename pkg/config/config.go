@@ -21,13 +21,13 @@ func New() (*BaseConfig, error) {
 	if err := env.Parse(cfg); err != nil {
 		return nil, fmt.Errorf("parse env: %w", err)
 	}
-	if err := cfg.validate(); err != nil {
+	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
 	return cfg, nil
 }
 
-func (c *BaseConfig) validate() error {
+func (c *BaseConfig) Validate() error {
 	if c.Environment != "development" && c.JWTSecret == "dev-secret-change-me" {
 		return errors.New("JWT_SECRET must be set in non-development environment")
 	}
