@@ -6,4 +6,5 @@ use (
 	./services/tenant-user
 	./services/project
 	./services/function
+	./services/event
 )
