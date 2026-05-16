@@ -182,7 +182,7 @@ func TestValidateTriggers_Empty(t *testing.T) {
 }
 
 func TestCreateFunction_ValidationErrors(t *testing.T) {
-	svc := NewFunctionService(nil)
+	svc := NewFunctionService(nil, nil)
 	preset := "python3.11"
 
 	// Empty name
@@ -206,14 +206,15 @@ func TestCreateFunction_ValidationErrors(t *testing.T) {
 // =========================================================================
 
 type mockQuerier struct {
-	getFunctionByIDAndProjectIDFn func(ctx context.Context, arg store.GetFunctionByIDAndProjectIDParams) (store.Function, error)
-	getProjectByIDAndTenantIDFn   func(ctx context.Context, arg store.GetProjectByIDAndTenantIDParams) (store.Project, error)
-	updateFunctionFn              func(ctx context.Context, arg store.UpdateFunctionParams) (store.Function, error)
+	getFunctionByIDAndProjectIDFn    func(ctx context.Context, arg store.GetFunctionByIDAndProjectIDParams) (store.Function, error)
+	getProjectByIDAndTenantIDFn      func(ctx context.Context, arg store.GetProjectByIDAndTenantIDParams) (store.Project, error)
+	updateFunctionFn                 func(ctx context.Context, arg store.UpdateFunctionParams) (store.Function, error)
+	updateFunctionBuildStatusFn      func(ctx context.Context, arg store.UpdateFunctionBuildStatusParams) (store.Function, error)
 
 	// Unused stubs
-	createFunctionFn          func(ctx context.Context, arg store.CreateFunctionParams) (store.Function, error)
-	deleteFunctionFn          func(ctx context.Context, arg store.DeleteFunctionParams) (store.Function, error)
-	listFunctionsByProjectIDFn func(ctx context.Context, arg store.ListFunctionsByProjectIDParams) ([]store.Function, error)
+	createFunctionFn              func(ctx context.Context, arg store.CreateFunctionParams) (store.Function, error)
+	deleteFunctionFn              func(ctx context.Context, arg store.DeleteFunctionParams) (store.Function, error)
+	listFunctionsByProjectIDFn    func(ctx context.Context, arg store.ListFunctionsByProjectIDParams) ([]store.Function, error)
 	listInvocationsByFunctionIDFn func(ctx context.Context, arg store.ListInvocationsByFunctionIDParams) ([]store.Invocation, error)
 }
 
@@ -264,6 +265,13 @@ func (m *mockQuerier) ListInvocationsByFunctionID(ctx context.Context, arg store
 		return m.listInvocationsByFunctionIDFn(ctx, arg)
 	}
 	return nil, nil
+}
+
+func (m *mockQuerier) UpdateFunctionBuildStatus(ctx context.Context, arg store.UpdateFunctionBuildStatusParams) (store.Function, error) {
+	if m.updateFunctionBuildStatusFn != nil {
+		return m.updateFunctionBuildStatusFn(ctx, arg)
+	}
+	return store.Function{}, pgx.ErrNoRows
 }
 
 func newCurrentFunction() store.Function {
@@ -319,7 +327,7 @@ func TestUpdateFunction_MergeOptionalScalar(t *testing.T) {
 		},
 	}
 
-	svc := NewFunctionService(q)
+	svc := NewFunctionService(q, nil)
 	newName := "Updated Name"
 	newTimeout := int32(120)
 
@@ -367,7 +375,7 @@ func TestUpdateFunction_MergeOneofSourceSwitch(t *testing.T) {
 		},
 	}
 
-	svc := NewFunctionService(q)
+	svc := NewFunctionService(q, nil)
 	inlineType := "inline"
 	inlineConfig := mustJSON(InlineSourceConfig{Code: "print('hello')", Filename: "main.py"})
 
@@ -412,7 +420,7 @@ func TestUpdateFunction_MergeOneofRuntimeSwitch(t *testing.T) {
 		},
 	}
 
-	svc := NewFunctionService(q)
+	svc := NewFunctionService(q, nil)
 	dockerfile := "FROM python:3.11\nRUN pip install flask"
 
 	_, err := svc.UpdateFunction(t.Context(), UpdateFunctionParams{
@@ -451,7 +459,7 @@ func TestUpdateFunction_MergeRepeatedReplace(t *testing.T) {
 		},
 	}
 
-	svc := NewFunctionService(q)
+	svc := NewFunctionService(q, nil)
 	newTriggers := mustJSON([]TriggerJSON{{
 		Type:          "object_storage",
 		ObjectStorage: &ObjectStorageTriggerJSON{Bucket: "images", Events: []string{"ObjectCreated"}},
@@ -505,7 +513,7 @@ func TestUpdateFunction_MergeExclusiveConstraintDetected(t *testing.T) {
 		},
 	}
 
-	svc := NewFunctionService(q)
+	svc := NewFunctionService(q, nil)
 
 	// Send both preset and dockerfile via RuntimeSet
 	_, err := svc.UpdateFunction(t.Context(), UpdateFunctionParams{

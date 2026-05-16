@@ -7,6 +7,7 @@ import (
 
 type Config struct {
 	config.BaseConfig
+	K8sEnabled bool `env:"K8S_ENABLED" envDefault:"false"`
 }
 
 func NewConfig() (*Config, error) {

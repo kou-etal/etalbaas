@@ -30,7 +30,8 @@ type mockQuerier struct {
 	listFunctionsByProjectIDFn    func(ctx context.Context, arg store.ListFunctionsByProjectIDParams) ([]store.Function, error)
 	updateFunctionFn              func(ctx context.Context, arg store.UpdateFunctionParams) (store.Function, error)
 	deleteFunctionFn              func(ctx context.Context, arg store.DeleteFunctionParams) (store.Function, error)
-	listInvocationsByFunctionIDFn func(ctx context.Context, arg store.ListInvocationsByFunctionIDParams) ([]store.Invocation, error)
+	listInvocationsByFunctionIDFn    func(ctx context.Context, arg store.ListInvocationsByFunctionIDParams) ([]store.Invocation, error)
+	updateFunctionBuildStatusFn      func(ctx context.Context, arg store.UpdateFunctionBuildStatusParams) (store.Function, error)
 }
 
 func (m *mockQuerier) CreateFunction(ctx context.Context, arg store.CreateFunctionParams) (store.Function, error) {
@@ -82,6 +83,13 @@ func (m *mockQuerier) ListInvocationsByFunctionID(ctx context.Context, arg store
 	return nil, nil
 }
 
+func (m *mockQuerier) UpdateFunctionBuildStatus(ctx context.Context, arg store.UpdateFunctionBuildStatusParams) (store.Function, error) {
+	if m.updateFunctionBuildStatusFn != nil {
+		return m.updateFunctionBuildStatusFn(ctx, arg)
+	}
+	return store.Function{}, pgx.ErrNoRows
+}
+
 func injectUserID() connect.UnaryInterceptorFunc {
 	return func(next connect.UnaryFunc) connect.UnaryFunc {
 		return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
@@ -99,7 +107,7 @@ func injectUserID() connect.UnaryInterceptorFunc {
 
 func setupTestServer(t *testing.T, q store.Querier) (functionv1connect.FunctionServiceClient, func()) {
 	t.Helper()
-	svc := svcpkg.NewFunctionService(q)
+	svc := svcpkg.NewFunctionService(q, nil)
 	h := handler.NewFunctionHandler(svc)
 	path, hnd := functionv1connect.NewFunctionServiceHandler(h,
 		connect.WithInterceptors(injectUserID()),

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"regexp"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/kou-etal/etalbaas/pkg/apperror"
+	"github.com/kou-etal/etalbaas/pkg/k8s"
 	"github.com/kou-etal/etalbaas/services/function/internal/store"
 )
 
@@ -24,6 +26,8 @@ const (
 	maxTimeoutLight    = 30
 	maxTimeoutHeavyCPU = 3600
 	defaultTimeoutSec  = 30
+
+	maxInlineSourceBytes = 1024 * 1024 // 1MB, matches ConfigMap limit
 )
 
 var functionNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*[a-z0-9]$`)
@@ -87,11 +91,12 @@ type EnvVarJSON struct {
 // --- Service ---
 
 type FunctionService struct {
-	q store.Querier
+	q      store.Querier
+	crdMgr k8s.FunctionCRDManager // nil when K8s is disabled
 }
 
-func NewFunctionService(q store.Querier) *FunctionService {
-	return &FunctionService{q: q}
+func NewFunctionService(q store.Querier, crdMgr k8s.FunctionCRDManager) *FunctionService {
+	return &FunctionService{q: q, crdMgr: crdMgr}
 }
 
 // --- Create ---
@@ -137,6 +142,9 @@ func (s *FunctionService) CreateFunction(ctx context.Context, p CreateFunctionPa
 	if err := validateTriggers(p.Triggers); err != nil {
 		return store.Function{}, err
 	}
+	if err := validateInlineSourceSize(p.SourceType, p.SourceConfig); err != nil {
+		return store.Function{}, err
+	}
 
 	p.TimeoutSec = applyDefaultTimeout(p.TimeoutSec)
 	if err := validateTimeout(p.TimeoutSec, p.Kind, p.GpuConfig); err != nil {
@@ -172,6 +180,10 @@ func (s *FunctionService) CreateFunction(ctx context.Context, p CreateFunctionPa
 		}
 		return store.Function{}, wrapDBError(err, "create function")
 	}
+
+	// CRD creation: best-effort. Failure is logged; next GetFunction will self-heal.
+	s.applyCRD(ctx, row)
+
 	return row, nil
 }
 
@@ -192,6 +204,10 @@ func (s *FunctionService) GetFunction(ctx context.Context, tenantID uuid.UUID, p
 	if err != nil {
 		return store.Function{}, wrapDBError(err, "get function")
 	}
+
+	// Lazy sync: fetch CRD status and update meta DB if changed.
+	row = s.syncBuildStatus(ctx, row)
+
 	return row, nil
 }
 
@@ -290,6 +306,9 @@ func (s *FunctionService) UpdateFunction(ctx context.Context, p UpdateFunctionPa
 	if err := validateTriggers(merged.Triggers); err != nil {
 		return store.Function{}, err
 	}
+	if err := validateInlineSourceSize(merged.SourceType, merged.SourceConfig); err != nil {
+		return store.Function{}, err
+	}
 
 	timeout := applyDefaultTimeout(merged.TimeoutSec)
 	if err := validateTimeout(timeout, current.Kind, merged.GpuConfig); err != nil {
@@ -318,6 +337,10 @@ func (s *FunctionService) UpdateFunction(ctx context.Context, p UpdateFunctionPa
 	if err != nil {
 		return store.Function{}, wrapDBError(err, "update function")
 	}
+
+	// CRD update: best-effort.
+	s.applyCRD(ctx, row)
+
 	return row, nil
 }
 
@@ -382,6 +405,14 @@ func (s *FunctionService) DeleteFunction(ctx context.Context, tenantID uuid.UUID
 	if err != nil {
 		return store.Function{}, wrapDBError(err, "delete function")
 	}
+
+	// CRD deletion: best-effort.
+	if s.crdMgr != nil {
+		if err := s.crdMgr.Delete(ctx, projectID, row.Name); err != nil {
+			slog.ErrorContext(ctx, "failed to delete Function CRD", "function", row.Name, "error", err)
+		}
+	}
+
 	return row, nil
 }
 
@@ -580,4 +611,121 @@ func wrapDBError(err error, msg string) *apperror.AppError {
 		return apperror.Wrap(apperror.CodeCanceled, msg, err)
 	}
 	return apperror.Wrap(apperror.CodeInternal, msg, err)
+}
+
+// --- CRD integration ---
+
+// applyCRD creates or updates the Function CRD. Failures are logged only.
+func (s *FunctionService) applyCRD(ctx context.Context, row store.Function) {
+	if s.crdMgr == nil {
+		return
+	}
+	params, err := buildCRDParamsFromRow(row)
+	if err != nil {
+		slog.ErrorContext(ctx, "failed to build CRD params from DB row",
+			"function", row.Name, "project_id", row.ProjectID, "error", err)
+		return
+	}
+	if err := s.crdMgr.CreateOrUpdate(ctx, params); err != nil {
+		slog.ErrorContext(ctx, "failed to apply Function CRD",
+			"function", row.Name, "project_id", row.ProjectID, "error", err)
+	}
+}
+
+// syncBuildStatus fetches CRD status and updates meta DB if there is a diff.
+// If CRD is missing, it attempts self-healing by recreating the CRD.
+func (s *FunctionService) syncBuildStatus(ctx context.Context, row store.Function) store.Function {
+	if s.crdMgr == nil || row.Status == "deleted" {
+		return row
+	}
+
+	crdStatus, err := s.crdMgr.GetStatus(ctx, row.ProjectID, row.Name)
+	if errors.Is(err, k8s.ErrCRDNotFound) {
+		// Self-healing: CRD missing → recreate
+		slog.WarnContext(ctx, "Function CRD not found, attempting self-healing",
+			"function", row.Name, "project_id", row.ProjectID)
+		s.applyCRD(ctx, row)
+		return row
+	}
+	if err != nil {
+		slog.WarnContext(ctx, "failed to get Function CRD status",
+			"function", row.Name, "project_id", row.ProjectID, "error", err)
+		return row
+	}
+
+	// Map CRD phase → meta DB status
+	dbStatus := mapPhaseToStatus(crdStatus.Phase)
+	if dbStatus == "" {
+		return row // CRD has no status yet
+	}
+
+	// Check if meta DB needs an update
+	if row.Status == dbStatus &&
+		ptrStringEqual(row.BuildImageRef, crdStatus.ImageRef) &&
+		ptrStringEqual(row.BuildImageDigest, crdStatus.ImageDigest) {
+		return row // no diff
+	}
+
+	lastBuiltAt := pgtype.Timestamptz{}
+	if crdStatus.LastBuiltAt != nil {
+		lastBuiltAt = pgtype.Timestamptz{Time: *crdStatus.LastBuiltAt, Valid: true}
+	}
+
+	updated, err := s.q.UpdateFunctionBuildStatus(ctx, store.UpdateFunctionBuildStatusParams{
+		ID:               row.ID,
+		ProjectID:        row.ProjectID,
+		Status:           dbStatus,
+		BuildImageRef:    nilIfEmpty(crdStatus.ImageRef),
+		BuildImageDigest: nilIfEmpty(crdStatus.ImageDigest),
+		BuildDurationSec: crdStatus.BuildDurationSec,
+		LastBuiltAt:      lastBuiltAt,
+	})
+	if err != nil {
+		slog.WarnContext(ctx, "failed to sync build status to meta DB",
+			"function", row.Name, "project_id", row.ProjectID, "error", err)
+		return row
+	}
+	return updated
+}
+
+func mapPhaseToStatus(phase string) string {
+	switch phase {
+	case "Building":
+		return "building"
+	case "Ready":
+		return "ready"
+	case "Failed":
+		return "failed"
+	default:
+		return ""
+	}
+}
+
+func ptrStringEqual(ptr *string, val string) bool {
+	if ptr == nil {
+		return val == ""
+	}
+	return *ptr == val
+}
+
+func nilIfEmpty(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}
+
+// validateInlineSourceSize checks that inline source code doesn't exceed 1MB.
+func validateInlineSourceSize(sourceType string, sourceConfig []byte) *apperror.AppError {
+	if sourceType != "inline" || len(sourceConfig) == 0 {
+		return nil
+	}
+	var cfg InlineSourceConfig
+	if err := json.Unmarshal(sourceConfig, &cfg); err != nil {
+		return nil // validation of format is done elsewhere
+	}
+	if len(cfg.Code) > maxInlineSourceBytes {
+		return apperror.New(apperror.CodeInvalidArgument, "inline source exceeds 1MB limit, use git or zip")
+	}
+	return nil
 }
