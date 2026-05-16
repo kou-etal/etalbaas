@@ -24,6 +24,7 @@ import (
 	"github.com/kou-etal/etalbaas/operator/internal/build"
 	"github.com/kou-etal/etalbaas/operator/internal/config"
 	"github.com/kou-etal/etalbaas/operator/internal/natsadmin"
+	gpuprovider "github.com/kou-etal/etalbaas/operator/internal/provider/gpu"
 	"github.com/kou-etal/etalbaas/operator/internal/resources"
 )
 
@@ -32,9 +33,10 @@ const functionFinalizer = "etalbaas.io/function-finalizer"
 // FunctionReconciler reconciles a Function object.
 type FunctionReconciler struct {
 	client.Client
-	Scheme    *runtime.Scheme
-	Config    config.OperatorConfig
-	NATSAdmin *natsadmin.NATSAdmin
+	Scheme     *runtime.Scheme
+	Config     config.OperatorConfig
+	NATSAdmin  *natsadmin.NATSAdmin
+	GPUFactory *gpuprovider.Factory
 }
 
 // +kubebuilder:rbac:groups=etalbaas.io,resources=functions,verbs=get;list;watch;create;update;patch;delete
@@ -96,7 +98,13 @@ func (r *FunctionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{}, err
 	}
 
-	// 4. Build phase: determine if a build is needed
+	// 4. Validate GPU configuration (before build to fail fast)
+	if err := r.validateGPUConfig(&fn); err != nil {
+		logger.Error(err, "GPU configuration invalid")
+		return r.setFunctionFailed(ctx, &fn, "GPUConfigInvalid", err)
+	}
+
+	// 5. Build phase: determine if a build is needed
 	needsBuild := fn.Status.ObservedGeneration < fn.Generation
 
 	if needsBuild || (fn.Status.Phase == etalbaasv1alpha1.FunctionPhaseBuilding) {
@@ -115,6 +123,13 @@ func (r *FunctionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	if err := r.reconcileWorkload(ctx, &fn, imageRef); err != nil {
 		logger.Error(err, "failed to reconcile workload")
 		return r.setFunctionFailed(ctx, &fn, "WorkloadFailed", err)
+	}
+
+	// External GPU functions don't need in-cluster networking or autoscaling.
+	// The workload runs on the external provider; only build + status update needed.
+	if resources.IsExternalGPU(&fn) {
+		logger.Info("external GPU function, skipping Service/HTTPRoute/autoscaling")
+		return r.updateFunctionStatus(ctx, &fn)
 	}
 
 	// 7. Reconcile Service
@@ -141,7 +156,7 @@ func (r *FunctionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return r.setFunctionFailed(ctx, &fn, "HTTPRouteFailed", err)
 	}
 
-	// 10. Update status to Ready
+	// 11. Update status to Ready
 	return r.updateFunctionStatus(ctx, &fn)
 }
 
@@ -367,7 +382,17 @@ func (r *FunctionReconciler) reconcileBuild(ctx context.Context, fn *etalbaasv1a
 
 // reconcileWorkload creates or updates the Deployment for the function.
 // For heavy-job kind, cleans up stale Deployment/Service/HTTPRoute from previous kind.
+// For external GPU functions, skips Deployment creation (workload runs on external provider).
 func (r *FunctionReconciler) reconcileWorkload(ctx context.Context, fn *etalbaasv1alpha1.Function, imageRef string) error {
+	// External GPU functions don't create a local Deployment; workload runs on the provider.
+	if resources.IsExternalGPU(fn) {
+		resourceName := "func-" + fn.Name
+		r.deleteStaleDeployment(ctx, fn.Namespace, resourceName)
+		r.deleteStaleService(ctx, fn.Namespace, resourceName)
+		r.deleteStaleHTTPRoute(ctx, fn.Namespace, resourceName)
+		return nil
+	}
+
 	deploy := resources.DesiredFunctionDeployment(fn, imageRef, r.Config)
 	if deploy == nil {
 		// heavy-job: no Deployment. Clean up stale resources from a previous kind.
@@ -592,8 +617,11 @@ func (r *FunctionReconciler) reconcileUnstructuredFunction(ctx context.Context, 
 
 // updateFunctionStatus sets the function status to Ready after verifying Deployment readiness.
 func (r *FunctionReconciler) updateFunctionStatus(ctx context.Context, fn *etalbaasv1alpha1.Function) (ctrl.Result, error) {
-	// Verify Deployment readiness before marking Ready (skip for heavy-job which has no Deployment).
-	if fn.Spec.Kind != etalbaasv1alpha1.FunctionKindHeavyJob {
+	// External GPU: no local Deployment to check.
+	// Self-managed GPU + heavy-job: no Deployment to check.
+	// All others: verify Deployment readiness.
+	isExtGPU := resources.IsExternalGPU(fn)
+	if !isExtGPU && fn.Spec.Kind != etalbaasv1alpha1.FunctionKindHeavyJob {
 		deploy := &appsv1.Deployment{}
 		deployKey := types.NamespacedName{Name: "func-" + fn.Name, Namespace: fn.Namespace}
 		if err := r.Get(ctx, deployKey, deploy); err != nil {
@@ -619,17 +647,25 @@ func (r *FunctionReconciler) updateFunctionStatus(ctx context.Context, fn *etalb
 		RuntimeClass: "gvisor",
 	}
 
-	if isGPUSelfManaged(fn) {
-		fn.Status.Execution.RuntimeClass = "nvidia"
+	if isExtGPU {
+		fn.Status.Execution.RuntimeClass = "gvisor" // Dispatcher is CPU only
+		fn.Status.Execution.GpuProvider = fn.Spec.GPU.Provider
+		fn.Status.Execution.Mode = "ExternalGPU"
+	} else if isGPUSelfManaged(fn) {
+		smCfg := resources.ResolveSelfManagedConfig(r.Config)
+		fn.Status.Execution.RuntimeClass = smCfg.RuntimeClass
 		fn.Status.Execution.GpuProvider = "self-managed"
 	}
 
-	switch fn.Spec.Kind {
-	case etalbaasv1alpha1.FunctionKindHeavyJob:
-		fn.Status.Execution.Mode = "Job"
-		fn.Status.Execution.JobTemplate = "func-" + fn.Name + "-template"
-	default:
-		fn.Status.Execution.Mode = "Deployment"
+	// Set execution mode if not already set by GPU handling above
+	if fn.Status.Execution.Mode == "" {
+		switch fn.Spec.Kind {
+		case etalbaasv1alpha1.FunctionKindHeavyJob:
+			fn.Status.Execution.Mode = "Job"
+			fn.Status.Execution.JobTemplate = "func-" + fn.Name + "-template"
+		default:
+			fn.Status.Execution.Mode = "Deployment"
+		}
 	}
 
 	// Set trigger statuses
@@ -695,6 +731,29 @@ func isJobFailed(job *batchv1.Job) bool {
 
 func isGPUSelfManaged(fn *etalbaasv1alpha1.Function) bool {
 	return fn.Spec.GPU != nil && fn.Spec.GPU.Required && fn.Spec.GPU.Provider == "self-managed"
+}
+
+// validateGPUConfig validates that the function's GPU configuration is compatible
+// with the enabled GPU providers. Returns nil if GPU is not required.
+// Self-managed GPU is always allowed (handled directly in workload builder).
+// External GPU providers require the factory to be configured and the provider enabled.
+func (r *FunctionReconciler) validateGPUConfig(fn *etalbaasv1alpha1.Function) error {
+	if fn.Spec.GPU == nil || !fn.Spec.GPU.Required {
+		return nil
+	}
+	// Self-managed GPU is always allowed; it doesn't need an external provider.
+	if fn.Spec.GPU.Provider == "self-managed" {
+		return nil
+	}
+	// External GPU provider: requires factory to be configured.
+	if r.GPUFactory == nil || !r.GPUFactory.IsEnabled() {
+		return fmt.Errorf("function requires external GPU provider %q but GPU is disabled in platform configuration", fn.Spec.GPU.Provider)
+	}
+	_, err := r.GPUFactory.ResolveProvider(fn.Spec.GPU.Provider, fn.Spec.GPU.Product)
+	if err != nil {
+		return fmt.Errorf("GPU provider unavailable: %w", err)
+	}
+	return nil
 }
 
 // SetupWithManager sets up the controller with the Manager.

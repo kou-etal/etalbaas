@@ -12,6 +12,7 @@ import (
 	etalbaasv1alpha1 "github.com/kou-etal/etalbaas/operator/api/v1alpha1"
 	"github.com/kou-etal/etalbaas/operator/internal/config"
 	"github.com/kou-etal/etalbaas/operator/internal/natsadmin"
+	"github.com/kou-etal/etalbaas/operator/internal/provider/gpu"
 )
 
 // DesiredFunctionDeployment builds the desired Deployment for a Function workload.
@@ -149,22 +150,7 @@ func buildFunctionPodSpec(fn *etalbaasv1alpha1.Function, imageRef string, cfg co
 
 	// RuntimeClass: gVisor by default, nvidia for self-managed GPU
 	if isGPUSelfManaged(fn) {
-		nvidiaRuntime := "nvidia"
-		podSpec.RuntimeClassName = &nvidiaRuntime
-		// GPU node selector and tolerations
-		podSpec.NodeSelector = map[string]string{"gpu": "true"}
-		podSpec.Tolerations = []corev1.Toleration{
-			{
-				Key:      "nvidia.com/gpu",
-				Operator: corev1.TolerationOpExists,
-				Effect:   corev1.TaintEffectNoSchedule,
-			},
-		}
-		// Add GPU resource limit
-		podSpec.Containers[0].Resources.Limits["nvidia.com/gpu"] = resource.MustParse("1")
-
-		// Override security context for GPU (gVisor is not compatible)
-		podSpec.Containers[0].SecurityContext.ReadOnlyRootFilesystem = boolPtr(false)
+		applySelfManagedGPU(&podSpec, cfg)
 	} else {
 		gvisorRuntime := "gvisor"
 		if fn.Spec.Sandbox != nil && fn.Spec.Sandbox.RuntimeClass != "" {
@@ -300,6 +286,46 @@ func resolveEnvVars(fn *etalbaasv1alpha1.Function) []corev1.EnvVar {
 
 func isGPUSelfManaged(fn *etalbaasv1alpha1.Function) bool {
 	return fn.Spec.GPU != nil && fn.Spec.GPU.Required && fn.Spec.GPU.Provider == "self-managed"
+}
+
+// IsExternalGPU returns true if the function requires an external GPU provider.
+func IsExternalGPU(fn *etalbaasv1alpha1.Function) bool {
+	return fn.Spec.GPU != nil && fn.Spec.GPU.Required && fn.Spec.GPU.Provider != "self-managed"
+}
+
+// applySelfManagedGPU configures the PodSpec for self-managed GPU workloads.
+// Values come from operator config (Helm values) via the GPU provider config.
+func applySelfManagedGPU(podSpec *corev1.PodSpec, cfg config.OperatorConfig) {
+	smCfg := ResolveSelfManagedConfig(cfg)
+
+	runtimeClass := smCfg.RuntimeClass
+	podSpec.RuntimeClassName = &runtimeClass
+	podSpec.NodeSelector = smCfg.NodeSelector
+	podSpec.Tolerations = []corev1.Toleration{
+		{
+			Key:      "nvidia.com/gpu",
+			Operator: corev1.TolerationOpExists,
+			Effect:   corev1.TaintEffectNoSchedule,
+		},
+	}
+	podSpec.Containers[0].Resources.Limits[corev1.ResourceName("nvidia.com/gpu")] = resource.MustParse(smCfg.ResourceLimit)
+	podSpec.Containers[0].SecurityContext.ReadOnlyRootFilesystem = boolPtr(false)
+}
+
+// ResolveSelfManagedConfig extracts SelfManagedProviderConfig from operator config,
+// falling back to defaults if GPU config is not set or self-managed is not configured.
+func ResolveSelfManagedConfig(cfg config.OperatorConfig) gpu.SelfManagedProviderConfig {
+	if cfg.GPU.Providers.SelfManaged != nil && cfg.GPU.Providers.SelfManaged.Enabled {
+		smCfg := cfg.GPU.Providers.SelfManaged
+		p := gpu.NewSelfManagedProvider(gpu.SelfManagedProviderConfig{
+			NodeSelector:  smCfg.NodeSelector,
+			RuntimeClass:  smCfg.RuntimeClass,
+			ResourceLimit: smCfg.ResourceLimit,
+		})
+		return p.Config()
+	}
+	// Defaults: same as pre-refactor hardcoded values
+	return gpu.NewSelfManagedProvider(gpu.SelfManagedProviderConfig{}).Config()
 }
 
 func functionLabels(projectID, funcName string) map[string]string {
