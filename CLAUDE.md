@@ -114,7 +114,7 @@ etalbaas/
 11. ~~Platform Operator~~ (Project/Function CRDs, Kaniko build, multi-tenant isolation)
 12. ~~NATS JetStream 統合 + KEDA NATS Scaler~~
 13. ~~Storage Provider + Storage MS (R2/MinIO)~~
-14. Function Auto-Build 完成度向上 + 実行経路動作確認
+14. ~~Function Auto-Build 完成度向上 + 実行経路動作確認~~
 15. GPU Provider 統合 (RunPod/Lambda Labs/さくら高火力)
 16. Envoy Gateway + Cloudflare DNS + Wildcard TLS
 17. Dashboard (Next.js)
