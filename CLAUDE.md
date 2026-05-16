@@ -39,9 +39,9 @@ etalbaas/
 ├── operator/               # kubebuilder Operator (Project/Function CRDs)
 ├── dashboard/              # Next.js frontend (planned)
 ├── deploy/
-│   ├── helm/               # Self-host配布用 Chart
+│   ├── helm/etalbaas/      # Self-host配布用 Helm Chart (5 MS + Operator + Gateway + MetaDB)
 │   ├── migrations/meta/    # golang-migrate (メタDB)
-│   └── argocd/             # GitOps
+│   └── argocd/             # GitOps (App of Apps: root-app + 12 component apps)
 └── docs/
     ├── architecture.md     # 設計書 v7.4
     └── database.md         # メタDB設計
@@ -53,6 +53,8 @@ etalbaas/
 - Proto lint: `cd proto && buf lint`
 - Go test (per service): `cd services/<name> && go test ./...`
 - Go build (per service): `cd services/<name> && go build ./...`
+- Helm lint: `helm lint deploy/helm/etalbaas/`
+- Helm template: `helm template etalbaas deploy/helm/etalbaas/`
 
 ## Architecture decisions
 
@@ -116,8 +118,9 @@ etalbaas/
 13. ~~Storage Provider + Storage MS (R2/MinIO)~~
 14. ~~Function Auto-Build 完成度向上 + 実行経路動作確認~~
 15. ~~GPU Provider 抽象化レイヤ~~ (Provider interface, RunPod Serverless, Self-managed GPU config, Dispatcher binary)
-16. Envoy Gateway + Cloudflare DNS + Wildcard TLS
-17. Dashboard (Next.js)
-18. Integration Tests + Beta
-19. Production Deploy
+16. ~~Deploy 基盤~~ (Helm Chart + Envoy Gateway + cert-manager + ArgoCD App of Apps)
+17. kubespray + post-install bootstrap
+18. Dashboard (Next.js)
+19. Integration Tests + Beta
+20. Production Deploy
 

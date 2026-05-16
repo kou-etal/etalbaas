@@ -40,3 +40,9 @@ point.txt
 
 # Deferred refactoring backlog
 REFACTOR_BACKLOG.md
+
+# Local tools
+.helm-bin/
+
+# Build artifacts
+operator/dispatcher.exe
