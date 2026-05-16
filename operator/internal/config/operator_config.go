@@ -22,6 +22,12 @@ type OperatorConfig struct {
 	// GatewayNamespace is the namespace of the Gateway resource.
 	GatewayNamespace string
 
+	// NATSMonitoringEndpoint is the NATS monitoring HTTP endpoint for KEDA scalers.
+	NATSMonitoringEndpoint string
+
+	// NATSSidecarImage is the container image for the NATS-to-HTTP sidecar.
+	NATSSidecarImage string
+
 	// CDCImage is the container image for the CDC Pod.
 	CDCImage string
 
@@ -54,7 +60,9 @@ func DefaultConfig() OperatorConfig {
 		PlatformNamespace: "platform-system",
 		BaseDomain:        "yourdomain.com",
 		RegistryEndpoint:  "zot.platform-system.svc:5000",
-		NATSEndpoint:      "nats.platform-system.svc:4222",
+		NATSEndpoint:              "nats.platform-system.svc:4222",
+		NATSMonitoringEndpoint:    "nats.platform-system.svc:8222",
+		NATSSidecarImage:          "etalbaas/nats-sidecar:latest",
 		GatewayName:       "etalbaas-gateway",
 		GatewayNamespace:  "platform-system",
 		CDCImage:          "etalbaas/cdc-pod:latest",
