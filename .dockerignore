@@ -2,11 +2,13 @@
 .github
 deploy
 docs
-dashboard
 node_modules
 *.md
+!dashboard/README.md
 .env*
 .claude
 .helm-bin
 .vscode
 .idea
+dashboard/node_modules
+dashboard/.next

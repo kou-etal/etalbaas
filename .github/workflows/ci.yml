@@ -70,6 +70,9 @@ jobs:
           - name: etalbaas-nats-sidecar
             dockerfile: services/nats-sidecar/Dockerfile
             context: services/nats-sidecar
+          - name: etalbaas-dashboard
+            dockerfile: dashboard/Dockerfile
+            context: .
     steps:
       - uses: actions/checkout@v4
 
