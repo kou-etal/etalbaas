@@ -1,6 +1,10 @@
 package config
 
-import "time"
+import (
+	"time"
+
+	"github.com/kou-etal/etalbaas/operator/internal/provider/gpu"
+)
 
 // OperatorConfig holds the configuration for the operator.
 type OperatorConfig struct {
@@ -45,6 +49,12 @@ type OperatorConfig struct {
 
 	// FreePlanQuota defines resource quotas for the free plan.
 	FreePlanQuota PlanQuota
+
+	// GPU holds GPU provider configuration. Parsed from Helm values.
+	GPU gpu.GPUConfig
+
+	// DispatcherImage is the container image for the GPU dispatcher.
+	DispatcherImage string
 }
 
 // PlanQuota defines resource quotas for a billing plan.
@@ -75,5 +85,7 @@ func DefaultConfig() OperatorConfig {
 			Memory: "4Gi",
 			Pods:   20,
 		},
+		GPU:             gpu.DefaultGPUConfig(),
+		DispatcherImage: "etalbaas/gpu-dispatcher:latest",
 	}
 }
