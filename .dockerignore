@@ -1,0 +1,12 @@
+.git
+.github
+deploy
+docs
+dashboard
+node_modules
+*.md
+.env*
+.claude
+.helm-bin
+.vscode
+.idea
