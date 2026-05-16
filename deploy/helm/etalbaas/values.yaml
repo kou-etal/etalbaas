@@ -1,0 +1,189 @@
+# ─── Global ──��───────────────────────────────────────────────────────────────
+global:
+  baseDomain: "yourdomain.com"
+  platformNamespace: "platform-system"
+  environment: "production"
+  imageRegistry: "ghcr.io/kou-etal"
+  imagePullPolicy: IfNotPresent
+
+# ─── Platform Services ────────────────────────────────────────────────────────
+services:
+  common:
+    port: 8080
+    metricsPort: 9090
+    otelEndpoint: "tempo.monitoring.svc:4317"
+    replicaCount: 2
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
+
+  tenantUser:
+    enabled: true
+    image:
+      repository: ""
+      tag: "latest"
+    replicaCount: ""
+    resources: {}
+
+  project:
+    enabled: true
+    image:
+      repository: ""
+      tag: "latest"
+    replicaCount: ""
+    resources: {}
+
+  function:
+    enabled: true
+    image:
+      repository: ""
+      tag: "latest"
+    replicaCount: ""
+    resources: {}
+    k8sEnabled: true
+
+  event:
+    enabled: true
+    image:
+      repository: ""
+      tag: "latest"
+    replicaCount: ""
+    resources: {}
+
+  storage:
+    enabled: true
+    image:
+      repository: ""
+      tag: "latest"
+    replicaCount: ""
+    resources: {}
+    s3:
+      endpoint: ""
+      bucket: "etalbaas-storage"
+      region: "auto"
+      useSSL: true
+
+# ─── Platform Operator ────────────────────────────────────────────────────────
+operator:
+  enabled: true
+  image:
+    repository: ""
+    tag: "latest"
+  replicaCount: 1
+  leaderElection: true
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+  config:
+    registryEndpoint: "zot.platform-system.svc:5000"
+    natsEndpoint: "nats.platform-system.svc:4222"
+    natsMonitoringEndpoint: "nats.platform-system.svc:8222"
+    gatewayName: "etalbaas-gateway"
+    gatewayNamespace: "platform-system"
+    cdcImage: "ghcr.io/kou-etal/etalbaas-cdc-pod:latest"
+    natsSidecarImage: "ghcr.io/kou-etal/etalbaas-nats-sidecar:latest"
+    postgrestImage: "postgrest/postgrest:v12.2.0"
+    redisImage: "redis:7-alpine"
+    kanikoImage: "gcr.io/kaniko-project/executor:latest"
+    buildTimeoutMinutes: 15
+    dispatcherImage: "ghcr.io/kou-etal/etalbaas-gpu-dispatcher:latest"
+    freePlanQuota:
+      cpu: "2"
+      memory: "4Gi"
+      pods: 20
+
+# ─── GPU Configuration ────────────────────────────────────────────────────────
+gpu:
+  enabled: false
+  defaultProvider: "runpod"
+  providers:
+    runpod:
+      enabled: false
+      apiKeySecret: "runpod-creds"
+    selfManaged:
+      enabled: false
+      nodeSelector:
+        gpu: "true"
+      runtimeClass: "nvidia"
+      resourceLimit: "1"
+
+# ─── Gateway Infrastructure ──────────────────────────────────────────────────
+gateway:
+  enabled: true
+  gatewayClassName: "envoy-gateway"
+  controllerName: "gateway.envoyproxy.io/gatewayclass-controller"
+  listeners:
+    http:
+      port: 80
+    https:
+      port: 443
+    postgres:
+      port: 5432
+
+# ─── cert-manager ────────────────────────────────────────────────────────────
+certManager:
+  enabled: true
+  issuer:
+    email: "admin@yourdomain.com"
+    server: "https://acme-v02.api.letsencrypt.org/directory"
+    cloudflare:
+      apiTokenSecretName: "cloudflare-api-token"
+      apiTokenSecretKey: "api-token"
+  certificates:
+    api:
+      enabled: true
+    db:
+      enabled: true
+
+# ─── Meta Database ────────────────────────────────────────────────────────────
+metadb:
+  mode: "internal"
+  internal:
+    instances: 2
+    storage: 20Gi
+    storageClass: ""
+    resources:
+      requests:
+        cpu: 500m
+        memory: 512Mi
+      limits:
+        cpu: "1"
+        memory: 1Gi
+    backup:
+      enabled: false
+      bucket: "etalbaas-backups"
+      credentialsSecret: "r2-backup-creds"
+      schedule: "0 2 * * *"
+      retentionDays: 30
+    pooler:
+      enabled: true
+      instances: 2
+      poolMode: "transaction"
+  external:
+    host: ""
+    port: 5432
+    database: "etalbaas_meta"
+    credentialsSecret: ""
+  migration:
+    enabled: true
+    image: "migrate/migrate:v4.16.2"
+
+# ─── Auth / JWT ──────────────────────────────────────────────────────────────
+auth:
+  jwt:
+    jwksUri: "http://gotrue-dev.platform-system.svc:9999/.well-known/jwks.json"
+    issuer: ""
+    audiences: []
+
+# ─── Secrets ─────────────────────────────────────────────────────────────────
+secrets:
+  # SealedSecret/Secret containing: JWT_SECRET, DATABASE_URL, S3_ACCESS_KEY, S3_SECRET_KEY
+  platformSecretName: "platform-secrets"

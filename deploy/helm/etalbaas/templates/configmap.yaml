@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "etalbaas.fullname" . }}-config
+  namespace: {{ include "etalbaas.namespace" . }}
+  labels:
+    {{- include "etalbaas.labels" . | nindent 4 }}
+data:
+  PORT: {{ .Values.services.common.port | quote }}
+  METRICS_PORT: {{ .Values.services.common.metricsPort | quote }}
+  ENV: {{ .Values.global.environment | quote }}
+  OTEL_EXPORTER_OTLP_ENDPOINT: {{ .Values.services.common.otelEndpoint | quote }}
+  BASE_DOMAIN: {{ .Values.global.baseDomain | quote }}
