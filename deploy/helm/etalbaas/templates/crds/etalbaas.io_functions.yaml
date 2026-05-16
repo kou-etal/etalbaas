@@ -1,0 +1,560 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.17.2
+  name: functions.etalbaas.io
+spec:
+  group: etalbaas.io
+  names:
+    kind: Function
+    listKind: FunctionList
+    plural: functions
+    singular: function
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.kind
+      name: Kind
+      type: string
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Function is the Schema for the functions API.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: FunctionSpec defines the desired state of a Function.
+            properties:
+              displayName:
+                description: DisplayName is the human-readable name of the function.
+                maxLength: 100
+                type: string
+              env:
+                description: Env defines environment variables for the function.
+                items:
+                  description: EnvVar defines an environment variable for a function.
+                  properties:
+                    name:
+                      description: Name is the environment variable name.
+                      type: string
+                    secretName:
+                      description: SecretName is the k8s Secret name to reference.
+                        Mutually exclusive with Value.
+                      type: string
+                    value:
+                      description: Value is the plain-text value. Mutually exclusive
+                        with SecretName.
+                      type: string
+                  required:
+                  - name
+                  type: object
+                type: array
+              execution:
+                description: Execution defines the execution mode and parameters.
+                properties:
+                  deployment:
+                    description: Deployment defines deployment-specific parameters.
+                    properties:
+                      maxReplicas:
+                        default: 10
+                        description: MaxReplicas is the maximum number of replicas.
+                        format: int32
+                        type: integer
+                      minReplicas:
+                        default: 0
+                        description: MinReplicas is the minimum number of replicas.
+                        format: int32
+                        type: integer
+                      scaleDownDelay:
+                        description: ScaleDownDelay is the seconds to wait before
+                          scaling to zero (Heavy Deployment only).
+                        format: int32
+                        type: integer
+                    type: object
+                  job:
+                    description: Job defines job-specific parameters.
+                    properties:
+                      backoffLimit:
+                        default: 2
+                        description: BackoffLimit is the number of retries before
+                          considering the Job failed.
+                        format: int32
+                        type: integer
+                      timeout:
+                        default: 0
+                        description: Timeout is the job timeout in seconds. 0 means
+                          no timeout.
+                        format: int32
+                        type: integer
+                      ttlSecondsAfterFinished:
+                        default: 600
+                        description: TTLSecondsAfterFinished is the time to keep the
+                          Job after completion.
+                        format: int32
+                        type: integer
+                    type: object
+                  mode:
+                    description: Mode is the execution mode.
+                    enum:
+                    - Job
+                    - Deployment
+                    type: string
+                required:
+                - mode
+                type: object
+              gpu:
+                description: GPU defines GPU requirements. If not set, the function
+                  runs on CPU only.
+                properties:
+                  product:
+                    description: Product is the provider-specific product (e.g., serverless,
+                      pods).
+                    type: string
+                  provider:
+                    description: Provider is the GPU provider.
+                    enum:
+                    - runpod
+                    - lambda-labs
+                    - sakura
+                    - self-managed
+                    type: string
+                  required:
+                    description: Required indicates whether GPU is required.
+                    type: boolean
+                  type:
+                    description: Type is the GPU type (e.g., T4, A10G, A100, H100).
+                    type: string
+                required:
+                - provider
+                - required
+                type: object
+              kind:
+                description: Kind is the function kind that determines execution strategy.
+                enum:
+                - heavy-job
+                - heavy-deployment
+                - light-deployment
+                type: string
+              projectRef:
+                description: ProjectRef references the parent Project.
+                properties:
+                  name:
+                    description: Name is the name of the Project CR.
+                    type: string
+                required:
+                - name
+                type: object
+              resources:
+                description: Resources defines the compute resources for the function.
+                properties:
+                  limits:
+                    description: Limits defines the maximum resources.
+                    properties:
+                      cpu:
+                        description: CPU is the CPU resource (e.g., "500m").
+                        type: string
+                      memory:
+                        description: Memory is the memory resource (e.g., "1Gi").
+                        type: string
+                    type: object
+                  requests:
+                    description: Requests defines the minimum resources.
+                    properties:
+                      cpu:
+                        description: CPU is the CPU resource (e.g., "500m").
+                        type: string
+                      memory:
+                        description: Memory is the memory resource (e.g., "1Gi").
+                        type: string
+                    type: object
+                type: object
+              runtime:
+                description: Runtime defines the runtime configuration for building
+                  the function.
+                properties:
+                  dockerfile:
+                    description: Dockerfile is the custom Dockerfile content. Only
+                      valid when preset is "custom".
+                    type: string
+                  preset:
+                    description: Preset is the runtime preset name.
+                    enum:
+                    - python-3.11
+                    - python-3.11-ml
+                    - python-3.12
+                    - node-20
+                    - node-22
+                    - go-1.22
+                    - custom
+                    type: string
+                  requirements:
+                    description: Requirements is a list of additional packages to
+                      install (pip/npm).
+                    items:
+                      type: string
+                    type: array
+                required:
+                - preset
+                type: object
+              sandbox:
+                description: Sandbox defines the sandbox configuration. Platform-enforced,
+                  not user-configurable.
+                properties:
+                  readOnlyRootFilesystem:
+                    default: true
+                    description: ReadOnlyRootFilesystem enforces a read-only root
+                      filesystem.
+                    type: boolean
+                  runAsNonRoot:
+                    default: true
+                    description: RunAsNonRoot enforces running as a non-root user.
+                    type: boolean
+                  runtimeClass:
+                    default: gvisor
+                    description: RuntimeClass is the Kubernetes RuntimeClass to use.
+                    type: string
+                type: object
+              source:
+                description: Source defines where the function code is located.
+                properties:
+                  git:
+                    description: Git defines the git source configuration.
+                    properties:
+                      path:
+                        default: /
+                        description: Path is the subdirectory within the repository.
+                        type: string
+                      ref:
+                        description: Ref is the git reference (branch, tag, or commit
+                          SHA).
+                        type: string
+                      repo:
+                        description: Repo is the git repository URL.
+                        type: string
+                    required:
+                    - repo
+                    type: object
+                  inline:
+                    description: Inline defines the inline source configuration.
+                    properties:
+                      entrypoint:
+                        description: Entrypoint is the main file to execute.
+                        type: string
+                      files:
+                        additionalProperties:
+                          type: string
+                        description: Files is a map of filename to file content.
+                        type: object
+                    required:
+                    - entrypoint
+                    - files
+                    type: object
+                  type:
+                    description: Type is the source type discriminator.
+                    enum:
+                    - git
+                    - zip
+                    - inline
+                    type: string
+                  zip:
+                    description: Zip defines the zip source configuration.
+                    properties:
+                      sha256:
+                        description: Sha256 is the SHA-256 hash of the zip file for
+                          integrity verification.
+                        type: string
+                      storagePath:
+                        description: StoragePath is the path to the uploaded zip in
+                          object storage.
+                        type: string
+                    required:
+                    - storagePath
+                    type: object
+                required:
+                - type
+                type: object
+              triggers:
+                description: Triggers defines the event triggers for this function.
+                items:
+                  description: TriggerSpec defines an event trigger for a function.
+                  properties:
+                    databaseChange:
+                      description: DatabaseChange defines database change trigger
+                        configuration.
+                      properties:
+                        filter:
+                          description: Filter is an optional WHERE condition.
+                          type: string
+                        includeColumns:
+                          description: IncludeColumns limits which columns are included
+                            in the change event.
+                          items:
+                            type: string
+                          type: array
+                        operations:
+                          description: Operations is the list of operations to trigger
+                            on (INSERT, UPDATE, DELETE).
+                          items:
+                            type: string
+                          type: array
+                        table:
+                          description: Table is the database table to watch.
+                          type: string
+                      required:
+                      - operations
+                      - table
+                      type: object
+                    http:
+                      description: Http defines HTTP trigger configuration.
+                      properties:
+                        authentication:
+                          default: apikey
+                          description: Authentication is the authentication method.
+                          type: string
+                        path:
+                          default: /invoke
+                          description: Path is the HTTP path for the trigger.
+                          type: string
+                      type: object
+                    objectStorage:
+                      description: ObjectStorage defines object storage trigger configuration.
+                      properties:
+                        bucket:
+                          description: Bucket is the storage bucket name.
+                          type: string
+                        events:
+                          description: Events is the list of storage events to trigger
+                            on.
+                          items:
+                            type: string
+                          type: array
+                        prefix:
+                          description: Prefix is the object key prefix to filter.
+                          type: string
+                      required:
+                      - bucket
+                      - events
+                      type: object
+                    retryPolicy:
+                      description: RetryPolicy defines the retry policy for this trigger.
+                      properties:
+                        backoff:
+                          description: Backoff defines the backoff strategy.
+                          properties:
+                            initial:
+                              default: 5s
+                              description: Initial is the initial backoff duration
+                                (e.g., "5s").
+                              type: string
+                            multiplier:
+                              default: 2
+                              description: Multiplier is the backoff multiplier.
+                              format: int32
+                              type: integer
+                          type: object
+                        maxAttempts:
+                          default: 3
+                          description: MaxAttempts is the maximum number of retry
+                            attempts.
+                          format: int32
+                          type: integer
+                      type: object
+                    type:
+                      description: Type is the trigger type.
+                      enum:
+                      - Http
+                      - ObjectStorage
+                      - DatabaseChange
+                      type: string
+                  required:
+                  - type
+                  type: object
+                type: array
+            required:
+            - kind
+            - projectRef
+            - runtime
+            - source
+            type: object
+          status:
+            description: FunctionStatus defines the observed state of a Function.
+            properties:
+              build:
+                description: Build contains the build status information.
+                properties:
+                  buildDurationSeconds:
+                    description: BuildDurationSeconds is the build duration in seconds.
+                    format: int32
+                    type: integer
+                  imageDigest:
+                    description: ImageDigest is the image digest.
+                    type: string
+                  imageRef:
+                    description: ImageRef is the built container image reference.
+                    type: string
+                  lastBuiltAt:
+                    description: LastBuiltAt is the timestamp of the last successful
+                      build.
+                    format: date-time
+                    type: string
+                  status:
+                    description: Status is the build status (e.g., "Building", "Succeeded",
+                      "Failed").
+                    type: string
+                type: object
+              conditions:
+                description: Conditions represent the latest available observations
+                  of the function's state.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              execution:
+                description: Execution contains the execution status information.
+                properties:
+                  gpuProvider:
+                    description: GpuProvider is the resolved GPU provider.
+                    type: string
+                  jobTemplate:
+                    description: JobTemplate is the Job template name for heavy-job
+                      functions.
+                    type: string
+                  mode:
+                    description: Mode is the resolved execution mode (Job or Deployment).
+                    type: string
+                  runtimeClass:
+                    description: RuntimeClass is the resolved RuntimeClass.
+                    type: string
+                type: object
+              observedGeneration:
+                description: ObservedGeneration is the most recent generation observed.
+                format: int64
+                type: integer
+              phase:
+                description: Phase is the current phase of the function.
+                enum:
+                - Building
+                - Ready
+                - Failed
+                type: string
+              stats:
+                description: Stats contains runtime statistics.
+                properties:
+                  avgDurationMs:
+                    description: AvgDurationMs is the average invocation duration
+                      in milliseconds.
+                    format: int64
+                    type: integer
+                  errorCount:
+                    description: ErrorCount is the number of failed invocations.
+                    format: int64
+                    type: integer
+                  successCount:
+                    description: SuccessCount is the number of successful invocations.
+                    format: int64
+                    type: integer
+                  totalInvocations:
+                    description: TotalInvocations is the total number of invocations.
+                    format: int64
+                    type: integer
+                type: object
+              triggers:
+                description: Triggers contains the status of each trigger.
+                items:
+                  description: TriggerStatus contains the status of a single trigger.
+                  properties:
+                    endpoint:
+                      description: Endpoint is the trigger endpoint URL (for HTTP
+                        triggers).
+                      type: string
+                    status:
+                      description: Status is the trigger status (e.g., "Active", "Inactive").
+                      type: string
+                    type:
+                      description: Type is the trigger type.
+                      type: string
+                  required:
+                  - type
+                  type: object
+                type: array
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

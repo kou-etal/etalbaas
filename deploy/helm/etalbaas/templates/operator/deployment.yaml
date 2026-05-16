@@ -1,0 +1,100 @@
+{{- if .Values.operator.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: etalbaas-operator
+  namespace: {{ include "etalbaas.namespace" . }}
+  labels:
+    {{- include "etalbaas.serviceLabels" (dict "root" . "component" "operator") | nindent 4 }}
+spec:
+  replicas: {{ .Values.operator.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: operator
+      {{- include "etalbaas.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: operator
+        app.kubernetes.io/component: operator
+        {{- include "etalbaas.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: etalbaas-operator
+      automountServiceAccountToken: true
+      securityContext:
+        {{- include "etalbaas.podSecurityContext" . | nindent 8 }}
+      containers:
+        - name: operator
+          image: {{ include "etalbaas.operatorImageRef" . }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          args:
+            - --metrics-bind-address=:8080
+            - --health-probe-bind-address=:8081
+            {{- if .Values.operator.leaderElection }}
+            - --leader-elect=true
+            {{- end }}
+          ports:
+            - name: metrics
+              containerPort: 8080
+              protocol: TCP
+            - name: health
+              containerPort: 8081
+              protocol: TCP
+          env:
+            - name: PLATFORM_NAMESPACE
+              value: {{ include "etalbaas.namespace" . | quote }}
+            - name: BASE_DOMAIN
+              value: {{ .Values.global.baseDomain | quote }}
+            - name: REGISTRY_ENDPOINT
+              value: {{ .Values.operator.config.registryEndpoint | quote }}
+            - name: NATS_ENDPOINT
+              value: {{ .Values.operator.config.natsEndpoint | quote }}
+            - name: NATS_MONITORING_ENDPOINT
+              value: {{ .Values.operator.config.natsMonitoringEndpoint | quote }}
+            - name: GATEWAY_NAME
+              value: {{ .Values.operator.config.gatewayName | quote }}
+            - name: GATEWAY_NAMESPACE
+              value: {{ .Values.operator.config.gatewayNamespace | quote }}
+            - name: CDC_IMAGE
+              value: {{ .Values.operator.config.cdcImage | quote }}
+            - name: NATS_SIDECAR_IMAGE
+              value: {{ .Values.operator.config.natsSidecarImage | quote }}
+            - name: POSTGREST_IMAGE
+              value: {{ .Values.operator.config.postgrestImage | quote }}
+            - name: REDIS_IMAGE
+              value: {{ .Values.operator.config.redisImage | quote }}
+            - name: KANIKO_IMAGE
+              value: {{ .Values.operator.config.kanikoImage | quote }}
+            - name: BUILD_TIMEOUT_MINUTES
+              value: {{ .Values.operator.config.buildTimeoutMinutes | quote }}
+            - name: DISPATCHER_IMAGE
+              value: {{ .Values.operator.config.dispatcherImage | quote }}
+            - name: FREE_PLAN_CPU
+              value: {{ .Values.operator.config.freePlanQuota.cpu | quote }}
+            - name: FREE_PLAN_MEMORY
+              value: {{ .Values.operator.config.freePlanQuota.memory | quote }}
+            - name: FREE_PLAN_PODS
+              value: {{ .Values.operator.config.freePlanQuota.pods | quote }}
+            - name: GPU_ENABLED
+              value: {{ .Values.gpu.enabled | quote }}
+            {{- if .Values.gpu.enabled }}
+            - name: GPU_DEFAULT_PROVIDER
+              value: {{ .Values.gpu.defaultProvider | quote }}
+            {{- end }}
+          securityContext:
+            {{- include "etalbaas.containerSecurityContext" . | nindent 12 }}
+          resources:
+            {{- toYaml .Values.operator.resources | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 10
+{{- end }}
