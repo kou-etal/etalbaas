@@ -115,8 +115,9 @@ etalbaas/
 12. ~~NATS JetStream 統合 + KEDA NATS Scaler~~
 13. ~~Storage Provider + Storage MS (R2/MinIO)~~
 14. ~~Function Auto-Build 完成度向上 + 実行経路動作確認~~
-15. GPU Provider 統合 (RunPod/Lambda Labs/さくら高火力)
+15. ~~GPU Provider 抽象化レイヤ~~ (Provider interface, RunPod Serverless, Self-managed GPU config, Dispatcher binary)
 16. Envoy Gateway + Cloudflare DNS + Wildcard TLS
 17. Dashboard (Next.js)
 18. Integration Tests + Beta
 19. Production Deploy
+
