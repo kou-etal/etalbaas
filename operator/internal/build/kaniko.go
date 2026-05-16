@@ -92,24 +92,7 @@ func KanikoBuildJob(
 							},
 						},
 					},
-					Volumes: []corev1.Volume{
-						{
-							Name: "workspace",
-							VolumeSource: corev1.VolumeSource{
-								EmptyDir: &corev1.EmptyDirVolumeSource{},
-							},
-						},
-						{
-							Name: "dockerfile",
-							VolumeSource: corev1.VolumeSource{
-								ConfigMap: &corev1.ConfigMapVolumeSource{
-									LocalObjectReference: corev1.LocalObjectReference{
-										Name: fmt.Sprintf("build-%s-%s-dockerfile", projectID, funcName),
-									},
-								},
-							},
-						},
-					},
+					Volumes: buildVolumes(fn, cfg),
 				},
 			},
 		},
@@ -152,6 +135,85 @@ func ImageDestination(fn *etalbaasv1alpha1.Function, cfg config.OperatorConfig) 
 	shortHash := shortSha(fmt.Sprintf("%s-%s-%d", projectID, funcName, generation))
 	imageTag := fmt.Sprintf("%d-%s", generation, shortHash)
 	return fmt.Sprintf("%s/project-%s/%s:%s", cfg.RegistryEndpoint, projectID, funcName, imageTag)
+}
+
+// buildVolumes returns the volumes for the build Job.
+// Always includes workspace (emptyDir) and dockerfile (ConfigMap).
+// For inline/zip source types, adds a source-data volume backed by a ConfigMap.
+func buildVolumes(fn *etalbaasv1alpha1.Function, cfg config.OperatorConfig) []corev1.Volume {
+	projectID := fn.Spec.ProjectRef.Name
+	funcName := fn.Name
+
+	volumes := []corev1.Volume{
+		{
+			Name: "workspace",
+			VolumeSource: corev1.VolumeSource{
+				EmptyDir: &corev1.EmptyDirVolumeSource{},
+			},
+		},
+		{
+			Name: "dockerfile",
+			VolumeSource: corev1.VolumeSource{
+				ConfigMap: &corev1.ConfigMapVolumeSource{
+					LocalObjectReference: corev1.LocalObjectReference{
+						Name: fmt.Sprintf("build-%s-%s-dockerfile", projectID, funcName),
+					},
+				},
+			},
+		},
+	}
+
+	// Inline source: files are delivered via ConfigMap.
+	// Zip source: requires object storage download (not yet implemented).
+	if fn.Spec.Source.Type == "inline" {
+		volumes = append(volumes, corev1.Volume{
+			Name: "source-data",
+			VolumeSource: corev1.VolumeSource{
+				ConfigMap: &corev1.ConfigMapVolumeSource{
+					LocalObjectReference: corev1.LocalObjectReference{
+						Name: SourceConfigMapName(projectID, funcName),
+					},
+				},
+			},
+		})
+	}
+
+	return volumes
+}
+
+// SourceConfigMapName returns the ConfigMap name for inline/zip source data.
+func SourceConfigMapName(projectID, funcName string) string {
+	return fmt.Sprintf("build-%s-%s-source", projectID, funcName)
+}
+
+// BuildSourceConfigMap creates a ConfigMap containing inline source files.
+func BuildSourceConfigMap(
+	fn *etalbaasv1alpha1.Function,
+	cfg config.OperatorConfig,
+) *corev1.ConfigMap {
+	projectID := fn.Spec.ProjectRef.Name
+	funcName := fn.Name
+
+	data := make(map[string]string)
+	if fn.Spec.Source.Inline != nil {
+		for k, v := range fn.Spec.Source.Inline.Files {
+			data[k] = v
+		}
+	}
+
+	return &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      SourceConfigMapName(projectID, funcName),
+			Namespace: cfg.PlatformNamespace,
+			Labels: map[string]string{
+				"etalbaas.io/project-id":    projectID,
+				"etalbaas.io/function":      funcName,
+				"etalbaas.io/build":         "true",
+				"app.kubernetes.io/part-of": "etalbaas",
+			},
+		},
+		Data: data,
+	}
 }
 
 // Pinned image versions for reproducibility and supply-chain safety.
@@ -218,7 +280,7 @@ func buildInitContainers(fn *etalbaasv1alpha1.Function) []corev1.Container {
 			},
 			dockerfileCopyInitContainer(),
 		}
-	case "zip", "inline":
+	case "inline":
 		return []corev1.Container{
 			{
 				Name:            "source-fetch",
@@ -229,6 +291,22 @@ func buildInitContainers(fn *etalbaasv1alpha1.Function) []corev1.Container {
 				VolumeMounts: []corev1.VolumeMount{
 					{Name: "workspace", MountPath: "/workspace"},
 					{Name: "source-data", MountPath: "/source-data"},
+				},
+			},
+			dockerfileCopyInitContainer(),
+		}
+	case "zip":
+		// TODO: zip source requires downloading from object storage.
+		// Not yet implemented; the build will fail with a clear error.
+		return []corev1.Container{
+			{
+				Name:            "source-fetch",
+				Image:           alpineImage,
+				Command:         []string{"sh", "-c"},
+				Args:            []string{"echo 'ERROR: zip source build not yet implemented' && exit 1"},
+				SecurityContext: sc,
+				VolumeMounts: []corev1.VolumeMount{
+					{Name: "workspace", MountPath: "/workspace"},
 				},
 			},
 			dockerfileCopyInitContainer(),

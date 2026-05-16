@@ -214,6 +214,18 @@ func (r *FunctionReconciler) cleanupBuildJobs(ctx context.Context, fn *etalbaasv
 		}
 	}
 
+	// Delete source configmaps (inline/zip)
+	sourceCMName := build.SourceConfigMapName(projectID, funcName)
+	sourceCM := &corev1.ConfigMap{}
+	if err := r.Get(ctx, types.NamespacedName{
+		Name:      sourceCMName,
+		Namespace: r.Config.PlatformNamespace,
+	}, sourceCM); err == nil {
+		if err := r.Delete(ctx, sourceCM); err != nil && !apierrors.IsNotFound(err) {
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -247,6 +259,26 @@ func (r *FunctionReconciler) reconcileBuild(ctx context.Context, fn *etalbaasv1a
 		existingCM.Data = desiredCM.Data
 		if err := r.Update(ctx, existingCM); err != nil {
 			return ctrl.Result{}, err
+		}
+	}
+
+	// Create/update source ConfigMap for inline sources.
+	// Zip source requires object storage download (not yet implemented).
+	if fn.Spec.Source.Type == "inline" {
+		desiredSourceCM := build.BuildSourceConfigMap(fn, r.Config)
+		existingSourceCM := &corev1.ConfigMap{}
+		sourceCMKey := types.NamespacedName{Name: desiredSourceCM.Name, Namespace: desiredSourceCM.Namespace}
+		if err := r.Get(ctx, sourceCMKey, existingSourceCM); apierrors.IsNotFound(err) {
+			if err := r.Create(ctx, desiredSourceCM); err != nil {
+				return ctrl.Result{}, fmt.Errorf("create source configmap: %w", err)
+			}
+		} else if err != nil {
+			return ctrl.Result{}, err
+		} else {
+			existingSourceCM.Data = desiredSourceCM.Data
+			if err := r.Update(ctx, existingSourceCM); err != nil {
+				return ctrl.Result{}, err
+			}
 		}
 	}
 
