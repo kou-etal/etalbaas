@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/kou-etal/etalbaas/pkg/k8s"
 	"github.com/kou-etal/etalbaas/pkg/metadb"
 	"github.com/kou-etal/etalbaas/pkg/observability"
 	"github.com/kou-etal/etalbaas/pkg/server"
@@ -48,8 +49,18 @@ func main() {
 	}
 	defer pool.Close()
 
+	var crdMgr k8s.FunctionCRDManager
+	if cfg.K8sEnabled {
+		dynClient, err := k8s.NewDynamicClient()
+		if err != nil {
+			log.Fatal("create k8s dynamic client:", err)
+		}
+		crdMgr = k8s.NewFunctionCRDManager(dynClient)
+		slog.Info("K8s CRD manager enabled")
+	}
+
 	q := store.New(pool)
-	functionSvc := service.NewFunctionService(q)
+	functionSvc := service.NewFunctionService(q, crdMgr)
 	functionHandler := handler.NewFunctionHandler(functionSvc)
 
 	interceptors := server.DefaultInterceptors(slog.Default())
