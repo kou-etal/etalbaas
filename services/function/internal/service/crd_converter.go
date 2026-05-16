@@ -67,10 +67,11 @@ func buildCRDParamsFromRow(row store.Function) (k8s.FunctionCRDParams, error) {
 		}
 		if gc.Type != "" {
 			params.GPU = &k8s.GPUConfigCRD{
-				Required: true,
-				Type:     gc.Type,
-				Provider: gc.Provider,
-				Product:  gc.Product,
+				Required:       true,
+				Type:           gc.Type,
+				Provider:       gc.Provider,
+				Product:        gc.Product,
+				ProviderConfig: gc.ProviderConfig,
 			}
 		}
 	}

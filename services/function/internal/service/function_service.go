@@ -58,9 +58,10 @@ type InlineSourceConfig struct {
 }
 
 type GpuConfigJSON struct {
-	Type     string `json:"type"`
-	Provider string `json:"provider"`
-	Product  string `json:"product"`
+	Type           string            `json:"type"`
+	Provider       string            `json:"provider"`
+	Product        string            `json:"product"`
+	ProviderConfig map[string]string `json:"provider_config,omitempty"`
 }
 
 type TriggerJSON struct {

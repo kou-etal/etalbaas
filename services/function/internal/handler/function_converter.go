@@ -77,9 +77,10 @@ func GpuConfigFromProto(gc *functionv1.GpuConfig) []byte {
 		return nil
 	}
 	b, _ := json.Marshal(service.GpuConfigJSON{
-		Type:     gc.Type,
-		Provider: gc.Provider,
-		Product:  gc.Product,
+		Type:           gc.Type,
+		Provider:       gc.Provider,
+		Product:        gc.Product,
+		ProviderConfig: gc.ProviderConfig,
 	})
 	return b
 }
@@ -230,9 +231,10 @@ func FunctionToProto(row store.Function) (*functionv1.Function, error) {
 			return nil, fmt.Errorf("unmarshal gpu config: %w", err)
 		}
 		f.GpuConfig = &functionv1.GpuConfig{
-			Type:     gc.Type,
-			Provider: gc.Provider,
-			Product:  gc.Product,
+			Type:           gc.Type,
+			Provider:       gc.Provider,
+			Product:        gc.Product,
+			ProviderConfig: gc.ProviderConfig,
 		}
 	}
 

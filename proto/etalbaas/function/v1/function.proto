@@ -112,6 +112,8 @@ message GpuConfig {
   string provider = 2;
   // プロダクト種別 (例: "serverless")
   string product = 3;
+  // プロバイダ固有設定 (例: RunPod endpoint_id)
+  map<string, string> provider_config = 4;
 }
 
 message Function {

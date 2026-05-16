@@ -165,6 +165,10 @@ type GPUSpec struct {
 	// Product is the provider-specific product (e.g., serverless, pods).
 	// +optional
 	Product string `json:"product,omitempty"`
+
+	// ProviderConfig holds provider-specific configuration (e.g., RunPod endpoint_id).
+	// +optional
+	ProviderConfig map[string]string `json:"providerConfig,omitempty"`
 }
 
 // ExecutionSpec defines the execution mode and parameters.

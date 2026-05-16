@@ -72,10 +72,11 @@ type ZipSourceCRD struct {
 
 // GPUConfigCRD represents GPU configuration for a Function CRD.
 type GPUConfigCRD struct {
-	Required bool
-	Type     string
-	Provider string
-	Product  string
+	Required       bool
+	Type           string
+	Provider       string
+	Product        string
+	ProviderConfig map[string]string
 }
 
 // TriggerCRD represents a trigger for a Function CRD.
@@ -244,12 +245,20 @@ func buildFunctionCRDObject(params FunctionCRDParams) *unstructured.Unstructured
 	}
 
 	if params.GPU != nil && params.GPU.Required {
-		spec["gpu"] = map[string]interface{}{
+		gpuSpec := map[string]interface{}{
 			"required": true,
 			"type":     params.GPU.Type,
 			"provider": params.GPU.Provider,
 			"product":  params.GPU.Product,
 		}
+		if len(params.GPU.ProviderConfig) > 0 {
+			pc := make(map[string]interface{}, len(params.GPU.ProviderConfig))
+			for k, v := range params.GPU.ProviderConfig {
+				pc[k] = v
+			}
+			gpuSpec["providerConfig"] = pc
+		}
+		spec["gpu"] = gpuSpec
 	}
 
 	if len(params.Triggers) > 0 {
