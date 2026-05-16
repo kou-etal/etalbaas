@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"crypto/rand"
 	"fmt"
 	"time"
 
@@ -22,6 +23,7 @@ import (
 
 	etalbaasv1alpha1 "github.com/kou-etal/etalbaas/operator/api/v1alpha1"
 	"github.com/kou-etal/etalbaas/operator/internal/config"
+	"github.com/kou-etal/etalbaas/operator/internal/natsadmin"
 	"github.com/kou-etal/etalbaas/operator/internal/resources"
 )
 
@@ -30,8 +32,9 @@ const projectFinalizer = "etalbaas.io/project-finalizer"
 // ProjectReconciler reconciles a Project object.
 type ProjectReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
-	Config config.OperatorConfig
+	Scheme    *runtime.Scheme
+	Config    config.OperatorConfig
+	NATSAdmin *natsadmin.NATSAdmin
 }
 
 // +kubebuilder:rbac:groups=etalbaas.io,resources=projects,verbs=get;list;watch;create;update;patch;delete
@@ -93,9 +96,20 @@ func (r *ProjectReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return r.setFailed(ctx, &project, "NetworkPolicyFailed", err)
 	}
 
+	if err := r.reconcileCDCSecret(ctx, &project); err != nil {
+		logger.Error(err, "failed to reconcile CDC secret")
+		return r.setFailed(ctx, &project, "CDCSecretFailed", err)
+	}
+
 	if err := r.reconcilePostgres(ctx, &project); err != nil {
 		logger.Error(err, "failed to reconcile postgres")
 		return r.setFailed(ctx, &project, "PostgresFailed", err)
+	}
+
+	// NATS stream must exist before CDC deployment starts publishing.
+	if err := r.reconcileNATSStream(ctx, &project); err != nil {
+		logger.Error(err, "failed to reconcile NATS stream")
+		return r.setFailed(ctx, &project, "NATSStreamFailed", err)
 	}
 
 	if err := r.reconcileCDC(ctx, &project); err != nil {
@@ -132,6 +146,14 @@ func (r *ProjectReconciler) handleDeletion(ctx context.Context, project *etalbaa
 	logger := log.FromContext(ctx)
 
 	if controllerutil.ContainsFinalizer(project, projectFinalizer) {
+		// Clean up NATS stream — block finalizer removal on failure to prevent orphan streams.
+		if r.NATSAdmin != nil {
+			if err := r.NATSAdmin.DeleteStream(project.Name); err != nil {
+				logger.Error(err, "failed to cleanup NATS stream, requeueing")
+				return ctrl.Result{RequeueAfter: 10 * time.Second}, err
+			}
+		}
+
 		// Delete the namespace (cascade deletes all child resources)
 		ns := &corev1.Namespace{}
 		nsName := "project-" + project.Name
@@ -305,6 +327,76 @@ func (r *ProjectReconciler) reconcileTLSRoute(ctx context.Context, project *etal
 		return r.deleteUnstructuredIfExists(ctx, resources.TLSRouteGVK(), namespace, "db-route")
 	}
 	return r.reconcileUnstructured(ctx, route)
+}
+
+// reconcileNATSStream ensures the NATS JetStream stream exists for a project with Postgres.
+func (r *ProjectReconciler) reconcileNATSStream(ctx context.Context, project *etalbaasv1alpha1.Project) error {
+	if r.NATSAdmin == nil {
+		return nil
+	}
+
+	pg := project.Spec.Stack.Postgres
+	if pg == nil || !pg.Enabled {
+		return r.NATSAdmin.DeleteStream(project.Name)
+	}
+	return r.NATSAdmin.EnsureStream(project.Name)
+}
+
+// reconcileCDCSecret creates the CDC user password Secret if it doesn't exist.
+// CNPG managed.roles references this Secret to set the CDC PostgreSQL user's password.
+func (r *ProjectReconciler) reconcileCDCSecret(ctx context.Context, project *etalbaasv1alpha1.Project) error {
+	namespace := "project-" + project.Name
+	pg := project.Spec.Stack.Postgres
+	if pg == nil || !pg.Enabled {
+		r.deleteIfExists(ctx, &corev1.Secret{}, namespace, "db-cdc")
+		return nil
+	}
+
+	// Idempotent: only create if absent.
+	existing := &corev1.Secret{}
+	err := r.Get(ctx, types.NamespacedName{Name: "db-cdc", Namespace: namespace}, existing)
+	if err == nil {
+		return nil
+	}
+	if !apierrors.IsNotFound(err) {
+		return fmt.Errorf("check CDC secret: %w", err)
+	}
+
+	password, err := generateRandomPassword(32)
+	if err != nil {
+		return fmt.Errorf("generate CDC password: %w", err)
+	}
+
+	userID := project.Labels[resources.LabelUserID]
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "db-cdc",
+			Namespace: namespace,
+			Labels:    resources.ComponentLabels(project.Name, userID, project.Spec.Plan, "cdc"),
+		},
+		Type: corev1.SecretTypeOpaque,
+		StringData: map[string]string{
+			"password": password,
+			"username": "cdc",
+			"host":     "db-rw",
+			"dbname":   "postgres",
+		},
+	}
+
+	return r.Create(ctx, secret)
+}
+
+// generateRandomPassword creates a random alphanumeric password.
+func generateRandomPassword(length int) (string, error) {
+	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	b := make([]byte, length)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	for i := range b {
+		b[i] = charset[b[i]%byte(len(charset))]
+	}
+	return string(b), nil
 }
 
 // reconcileNamespacedResource creates or updates a typed namespaced resource.

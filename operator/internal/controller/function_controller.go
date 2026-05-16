@@ -23,6 +23,7 @@ import (
 	etalbaasv1alpha1 "github.com/kou-etal/etalbaas/operator/api/v1alpha1"
 	"github.com/kou-etal/etalbaas/operator/internal/build"
 	"github.com/kou-etal/etalbaas/operator/internal/config"
+	"github.com/kou-etal/etalbaas/operator/internal/natsadmin"
 	"github.com/kou-etal/etalbaas/operator/internal/resources"
 )
 
@@ -31,8 +32,9 @@ const functionFinalizer = "etalbaas.io/function-finalizer"
 // FunctionReconciler reconciles a Function object.
 type FunctionReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
-	Config config.OperatorConfig
+	Scheme    *runtime.Scheme
+	Config    config.OperatorConfig
+	NATSAdmin *natsadmin.NATSAdmin
 }
 
 // +kubebuilder:rbac:groups=etalbaas.io,resources=functions,verbs=get;list;watch;create;update;patch;delete
@@ -45,6 +47,7 @@ type FunctionReconciler struct {
 // +kubebuilder:rbac:groups=autoscaling,resources=horizontalpodautoscalers,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=httproutes,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=keda.sh,resources=scaledobjects,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=http.keda.sh,resources=httpscaledobjects,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile handles the reconciliation loop for Function resources.
 func (r *FunctionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -120,13 +123,19 @@ func (r *FunctionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return r.setFunctionFailed(ctx, &fn, "ServiceFailed", err)
 	}
 
-	// 8. Reconcile autoscaling (HPA or KEDA ScaledObject)
+	// 8. Reconcile NATS consumer (for DatabaseChange triggers)
+	if err := r.reconcileNATSConsumer(ctx, &fn); err != nil {
+		logger.Error(err, "failed to reconcile NATS consumer")
+		return r.setFunctionFailed(ctx, &fn, "NATSConsumerFailed", err)
+	}
+
+	// 9. Reconcile autoscaling (HPA, KEDA ScaledObject, or HTTPScaledObject)
 	if err := r.reconcileAutoscaling(ctx, &fn); err != nil {
 		logger.Error(err, "failed to reconcile autoscaling")
 		return r.setFunctionFailed(ctx, &fn, "AutoscaleFailed", err)
 	}
 
-	// 9. Reconcile HTTPRoute
+	// 10. Reconcile HTTPRoute
 	if err := r.reconcileFunctionHTTPRoute(ctx, &fn); err != nil {
 		logger.Error(err, "failed to reconcile function HTTPRoute")
 		return r.setFunctionFailed(ctx, &fn, "HTTPRouteFailed", err)
@@ -145,6 +154,17 @@ func (r *FunctionReconciler) handleDeletion(ctx context.Context, fn *etalbaasv1a
 		if err := r.cleanupBuildJobs(ctx, fn); err != nil {
 			logger.Error(err, "failed to cleanup build jobs")
 			return ctrl.Result{RequeueAfter: 10 * time.Second}, err
+		}
+
+		// Clean up NATS consumer
+		if r.NATSAdmin != nil {
+			projectID := fn.Spec.ProjectRef.Name
+			if err := r.NATSAdmin.DeleteConsumer(
+				natsadmin.StreamName(projectID),
+				natsadmin.ConsumerName(fn.Name),
+			); err != nil {
+				logger.Error(err, "failed to cleanup NATS consumer")
+			}
 		}
 
 		controllerutil.RemoveFinalizer(fn, functionFinalizer)
@@ -262,12 +282,14 @@ func (r *FunctionReconciler) reconcileBuild(ctx context.Context, fn *etalbaasv1a
 			}
 			return ctrl.Result{Requeue: true}, nil
 		}
-		if job.Status.Failed > 0 {
+		// Check if the Job has truly failed (condition type=Failed, not just a pod retry).
+		if isJobFailed(job) {
 			logger.Info("build failed", "job", job.Name)
 			fn.Status.Phase = etalbaasv1alpha1.FunctionPhaseFailed
 			fn.Status.Build = &etalbaasv1alpha1.BuildStatus{
 				Status: etalbaasv1alpha1.BuildStatusFailed,
 			}
+			fn.Status.ObservedGeneration = fn.Generation
 			if err := r.Status().Update(ctx, fn); err != nil {
 				return ctrl.Result{}, err
 			}
@@ -314,7 +336,7 @@ func (r *FunctionReconciler) reconcileBuild(ctx context.Context, fn *etalbaasv1a
 // reconcileWorkload creates or updates the Deployment for the function.
 // For heavy-job kind, cleans up stale Deployment/Service/HTTPRoute from previous kind.
 func (r *FunctionReconciler) reconcileWorkload(ctx context.Context, fn *etalbaasv1alpha1.Function, imageRef string) error {
-	deploy := resources.DesiredFunctionDeployment(fn, imageRef)
+	deploy := resources.DesiredFunctionDeployment(fn, imageRef, r.Config)
 	if deploy == nil {
 		// heavy-job: no Deployment. Clean up stale resources from a previous kind.
 		resourceName := "func-" + fn.Name
@@ -362,17 +384,57 @@ func (r *FunctionReconciler) reconcileFunctionService(ctx context.Context, fn *e
 	return r.Update(ctx, existing)
 }
 
-// reconcileAutoscaling creates or updates HPA or KEDA ScaledObject.
-// Also cleans up stale autoscaler when kind changes (e.g., light→heavy).
+// reconcileNATSConsumer ensures the NATS JetStream consumer exists for DatabaseChange triggers.
+func (r *FunctionReconciler) reconcileNATSConsumer(ctx context.Context, fn *etalbaasv1alpha1.Function) error {
+	if r.NATSAdmin == nil {
+		if resources.HasDatabaseChangeTrigger(fn) {
+			logger := ctrl.LoggerFrom(ctx)
+			logger.Info("WARNING: NATS admin not configured, skipping consumer reconciliation for DatabaseChange trigger",
+				"function", fn.Name)
+		}
+		return nil
+	}
+
+	projectID := fn.Spec.ProjectRef.Name
+	consumerName := natsadmin.ConsumerName(fn.Name)
+	streamName := natsadmin.StreamName(projectID)
+
+	if !resources.HasDatabaseChangeTrigger(fn) {
+		// No DatabaseChange triggers — delete consumer if it exists.
+		return r.NATSAdmin.DeleteConsumer(streamName, consumerName)
+	}
+
+	// Build filter subjects from triggers.
+	var triggers []natsadmin.TriggerInfo
+	for _, t := range fn.Spec.Triggers {
+		if t.Type == "DatabaseChange" && t.DatabaseChange != nil {
+			triggers = append(triggers, natsadmin.TriggerInfo{
+				Table:      t.DatabaseChange.Table,
+				Operations: t.DatabaseChange.Operations,
+			})
+		}
+	}
+
+	filterSubjects := natsadmin.BuildFilterSubjects("events.database", projectID, triggers)
+
+	return r.NATSAdmin.EnsureConsumer(natsadmin.ConsumerConfig{
+		StreamName:     streamName,
+		ConsumerName:   consumerName,
+		FilterSubjects: filterSubjects,
+	})
+}
+
+// reconcileAutoscaling creates or updates HPA, KEDA ScaledObject, or HTTPScaledObject.
+// Also cleans up stale autoscalers when kind or trigger type changes.
 func (r *FunctionReconciler) reconcileAutoscaling(ctx context.Context, fn *etalbaasv1alpha1.Function) error {
-	funcName := fn.Name
-	resourceName := "func-" + funcName
+	resourceName := "func-" + fn.Name
 
 	// HPA for light-deployment
 	hpa := resources.DesiredHPA(fn)
 	if hpa != nil {
-		// Delete stale KEDA ScaledObject if it exists (kind changed from heavy→light)
+		// Delete stale KEDA resources if they exist (kind changed from heavy→light)
 		_ = r.deleteStaleScaledObject(ctx, fn.Namespace, resourceName)
+		_ = r.deleteStaleHTTPScaledObject(ctx, fn.Namespace, resourceName)
 
 		existing := &autoscalingv2.HorizontalPodAutoscaler{}
 		key := types.NamespacedName{Name: hpa.Name, Namespace: hpa.Namespace}
@@ -386,18 +448,26 @@ func (r *FunctionReconciler) reconcileAutoscaling(ctx context.Context, fn *etalb
 		return r.Update(ctx, existing)
 	}
 
-	// KEDA ScaledObject for heavy-deployment
-	scaledObj := resources.DesiredKEDAScaledObject(fn)
+	// KEDA ScaledObject for heavy-deployment with DatabaseChange trigger
+	scaledObj := resources.DesiredKEDAScaledObject(fn, r.Config)
 	if scaledObj != nil {
-		// Delete stale HPA if it exists (kind changed from light→heavy)
 		_ = r.deleteStaleHPA(ctx, fn.Namespace, resourceName)
-
+		_ = r.deleteStaleHTTPScaledObject(ctx, fn.Namespace, resourceName)
 		return r.reconcileUnstructuredFunction(ctx, scaledObj)
 	}
 
-	// Neither needed (heavy-job): clean up both if they exist
+	// HTTPScaledObject for heavy-deployment with Http trigger (no DatabaseChange)
+	httpScaledObj := resources.DesiredHTTPScaledObject(fn, r.Config)
+	if httpScaledObj != nil {
+		_ = r.deleteStaleHPA(ctx, fn.Namespace, resourceName)
+		_ = r.deleteStaleScaledObject(ctx, fn.Namespace, resourceName)
+		return r.reconcileUnstructuredFunction(ctx, httpScaledObj)
+	}
+
+	// Neither needed (heavy-job or no applicable triggers): clean up all.
 	_ = r.deleteStaleHPA(ctx, fn.Namespace, resourceName)
 	_ = r.deleteStaleScaledObject(ctx, fn.Namespace, resourceName)
+	_ = r.deleteStaleHTTPScaledObject(ctx, fn.Namespace, resourceName)
 
 	return nil
 }
@@ -434,6 +504,16 @@ func (r *FunctionReconciler) deleteStaleHTTPRoute(ctx context.Context, namespace
 	if err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, existing); err == nil {
 		_ = r.Delete(ctx, existing)
 	}
+}
+
+// deleteStaleHTTPScaledObject removes a KEDA HTTPScaledObject that is no longer needed.
+func (r *FunctionReconciler) deleteStaleHTTPScaledObject(ctx context.Context, namespace, name string) error {
+	existing := &unstructured.Unstructured{}
+	existing.SetGroupVersionKind(resources.KEDAHTTPScaledObjectGVK())
+	if err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, existing); err != nil {
+		return client.IgnoreNotFound(err)
+	}
+	return r.Delete(ctx, existing)
 }
 
 // deleteStaleScaledObject removes a KEDA ScaledObject that is no longer needed.
@@ -478,8 +558,27 @@ func (r *FunctionReconciler) reconcileUnstructuredFunction(ctx context.Context, 
 	return err
 }
 
-// updateFunctionStatus sets the function status to Ready.
+// updateFunctionStatus sets the function status to Ready after verifying Deployment readiness.
 func (r *FunctionReconciler) updateFunctionStatus(ctx context.Context, fn *etalbaasv1alpha1.Function) (ctrl.Result, error) {
+	// Verify Deployment readiness before marking Ready (skip for heavy-job which has no Deployment).
+	if fn.Spec.Kind != etalbaasv1alpha1.FunctionKindHeavyJob {
+		deploy := &appsv1.Deployment{}
+		deployKey := types.NamespacedName{Name: "func-" + fn.Name, Namespace: fn.Namespace}
+		if err := r.Get(ctx, deployKey, deploy); err != nil {
+			if apierrors.IsNotFound(err) {
+				return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+			}
+			return ctrl.Result{}, err
+		}
+		// For heavy-deployment (min=0), ReadyReplicas may be 0 — that's expected.
+		// For light-deployment (min>=1), at least 1 replica must be available.
+		if fn.Spec.Kind == etalbaasv1alpha1.FunctionKindLightDeployment && deploy.Status.ReadyReplicas < 1 {
+			logger := log.FromContext(ctx)
+			logger.Info("deployment not ready yet, requeueing", "readyReplicas", deploy.Status.ReadyReplicas)
+			return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+		}
+	}
+
 	fn.Status.Phase = etalbaasv1alpha1.FunctionPhaseReady
 	fn.Status.ObservedGeneration = fn.Generation
 
@@ -549,6 +648,17 @@ func (r *FunctionReconciler) setFunctionFailed(ctx context.Context, fn *etalbaas
 		return ctrl.Result{}, statusErr
 	}
 	return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+}
+
+// isJobFailed checks whether a Job has truly failed (the Job controller has given up),
+// as opposed to having a failed pod that is still being retried under backoffLimit.
+func isJobFailed(job *batchv1.Job) bool {
+	for _, c := range job.Status.Conditions {
+		if c.Type == batchv1.JobFailed && c.Status == corev1.ConditionTrue {
+			return true
+		}
+	}
+	return false
 }
 
 func isGPUSelfManaged(fn *etalbaasv1alpha1.Function) bool {

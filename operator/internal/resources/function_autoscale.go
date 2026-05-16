@@ -1,12 +1,16 @@
 package resources
 
 import (
+	"fmt"
+
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	etalbaasv1alpha1 "github.com/kou-etal/etalbaas/operator/api/v1alpha1"
+	"github.com/kou-etal/etalbaas/operator/internal/config"
+	"github.com/kou-etal/etalbaas/operator/internal/natsadmin"
 )
 
 // KEDAScaledObjectGVK returns the GroupVersionKind for KEDA ScaledObject.
@@ -15,6 +19,77 @@ func KEDAScaledObjectGVK() schema.GroupVersionKind {
 		Group:   "keda.sh",
 		Version: "v1alpha1",
 		Kind:    "ScaledObject",
+	}
+}
+
+// KEDAHTTPScaledObjectGVK returns the GroupVersionKind for KEDA HTTP add-on HTTPScaledObject.
+func KEDAHTTPScaledObjectGVK() schema.GroupVersionKind {
+	return schema.GroupVersionKind{
+		Group:   "http.keda.sh",
+		Version: "v1alpha1",
+		Kind:    "HTTPScaledObject",
+	}
+}
+
+// DesiredKEDAScaledObject builds the desired KEDA ScaledObject for a heavy-deployment Function
+// with a DatabaseChange trigger. Uses nats-jetstream trigger based on consumer pending count.
+// Returns nil if the function is not heavy-deployment or has no DatabaseChange trigger.
+func DesiredKEDAScaledObject(fn *etalbaasv1alpha1.Function, cfg config.OperatorConfig) *unstructured.Unstructured {
+	if fn.Spec.Kind != etalbaasv1alpha1.FunctionKindHeavyDeployment {
+		return nil
+	}
+
+	if !HasDatabaseChangeTrigger(fn) {
+		return nil
+	}
+
+	namespace := fn.Namespace
+	projectID := fn.Spec.ProjectRef.Name
+	funcName := fn.Name
+
+	maxReplicas := int64(10)
+	cooldownPeriod := int64(300) // 5 minutes
+
+	if fn.Spec.Execution != nil && fn.Spec.Execution.Deployment != nil {
+		if fn.Spec.Execution.Deployment.MaxReplicas != nil {
+			maxReplicas = int64(*fn.Spec.Execution.Deployment.MaxReplicas)
+		}
+		if fn.Spec.Execution.Deployment.ScaleDownDelay != nil {
+			cooldownPeriod = int64(*fn.Spec.Execution.Deployment.ScaleDownDelay)
+		}
+	}
+
+	return &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "keda.sh/v1alpha1",
+			"kind":       "ScaledObject",
+			"metadata": map[string]interface{}{
+				"name":      "func-" + funcName,
+				"namespace": namespace,
+				"labels":    toUnstructuredLabels(functionLabels(projectID, funcName)),
+			},
+			"spec": map[string]interface{}{
+				"scaleTargetRef": map[string]interface{}{
+					"name": "func-" + funcName,
+				},
+				"pollingInterval": int64(15),
+				"cooldownPeriod":  cooldownPeriod,
+				"minReplicaCount": int64(0),
+				"maxReplicaCount": maxReplicas,
+				"triggers": []interface{}{
+					map[string]interface{}{
+						"type": "nats-jetstream",
+						"metadata": map[string]interface{}{
+							"natsServerMonitoringEndpoint": cfg.NATSMonitoringEndpoint,
+							"account":                      "$G",
+							"stream":                       natsadmin.StreamName(projectID),
+							"consumer":                     natsadmin.ConsumerName(funcName),
+							"lagThreshold":                 "10",
+						},
+					},
+				},
+			},
+		},
 	}
 }
 
@@ -73,10 +148,22 @@ func DesiredHPA(fn *etalbaasv1alpha1.Function) *autoscalingv2.HorizontalPodAutos
 	}
 }
 
-// DesiredKEDAScaledObject builds the desired KEDA ScaledObject for a heavy-deployment Function.
-// Returns nil for non-heavy-deployment functions.
-func DesiredKEDAScaledObject(fn *etalbaasv1alpha1.Function) *unstructured.Unstructured {
+// DesiredHTTPScaledObject builds the desired KEDA HTTP add-on HTTPScaledObject
+// for heavy-deployment Functions with Http triggers (no DatabaseChange).
+// Enables 0→N scaling based on HTTP request rate.
+// Returns nil for non-heavy-deployment, heavy-job, heavy-deployment with DatabaseChange,
+// or functions without Http trigger.
+func DesiredHTTPScaledObject(fn *etalbaasv1alpha1.Function, cfg config.OperatorConfig) *unstructured.Unstructured {
 	if fn.Spec.Kind != etalbaasv1alpha1.FunctionKindHeavyDeployment {
+		return nil
+	}
+
+	// Heavy-deployment with DatabaseChange uses ScaledObject (nats-jetstream), not HTTPScaledObject.
+	if HasDatabaseChangeTrigger(fn) {
+		return nil
+	}
+
+	if !hasHTTPTrigger(fn) {
 		return nil
 	}
 
@@ -85,44 +172,54 @@ func DesiredKEDAScaledObject(fn *etalbaasv1alpha1.Function) *unstructured.Unstru
 	funcName := fn.Name
 
 	maxReplicas := int64(10)
-	cooldownPeriod := int64(300) // 5 minutes
-
 	if fn.Spec.Execution != nil && fn.Spec.Execution.Deployment != nil {
 		if fn.Spec.Execution.Deployment.MaxReplicas != nil {
 			maxReplicas = int64(*fn.Spec.Execution.Deployment.MaxReplicas)
 		}
-		if fn.Spec.Execution.Deployment.ScaleDownDelay != nil {
-			cooldownPeriod = int64(*fn.Spec.Execution.Deployment.ScaleDownDelay)
-		}
 	}
+
+	hostname := fmt.Sprintf("%s.api.%s", projectID, cfg.BaseDomain)
+	pathPrefix := fmt.Sprintf("/functions/%s/invoke", funcName)
 
 	return &unstructured.Unstructured{
 		Object: map[string]interface{}{
-			"apiVersion": "keda.sh/v1alpha1",
-			"kind":       "ScaledObject",
+			"apiVersion": "http.keda.sh/v1alpha1",
+			"kind":       "HTTPScaledObject",
 			"metadata": map[string]interface{}{
 				"name":      "func-" + funcName,
 				"namespace": namespace,
 				"labels":    toUnstructuredLabels(functionLabels(projectID, funcName)),
 			},
 			"spec": map[string]interface{}{
+				"hosts":        []interface{}{hostname},
+				"pathPrefixes": []interface{}{pathPrefix},
 				"scaleTargetRef": map[string]interface{}{
-					"name": "func-" + funcName,
+					"deployment": "func-" + funcName,
+					"service":    "func-" + funcName,
+					"port":       int64(8080),
 				},
-				"pollingInterval":  int64(15),
-				"cooldownPeriod":   cooldownPeriod,
-				"minReplicaCount":  int64(0),
-				"maxReplicaCount":  maxReplicas,
-				"triggers": []interface{}{
-					map[string]interface{}{
-						"type": "kubernetes-workload",
-						"metadata": map[string]interface{}{
-							"podSelector": "etalbaas.io/function=" + funcName,
-							"value":       "1",
-						},
+				"replicas": map[string]interface{}{
+					"min": int64(0),
+					"max": maxReplicas,
+				},
+				"scalingMetric": map[string]interface{}{
+					"requestRate": map[string]interface{}{
+						"targetValue": int64(100),
 					},
 				},
 			},
 		},
 	}
 }
+
+// HasDatabaseChangeTrigger returns true if the function has any valid DatabaseChange trigger.
+func HasDatabaseChangeTrigger(fn *etalbaasv1alpha1.Function) bool {
+	for _, t := range fn.Spec.Triggers {
+		if t.Type == "DatabaseChange" && t.DatabaseChange != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// hasHTTPTrigger is defined in function_service.go

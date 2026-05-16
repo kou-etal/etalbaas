@@ -4,6 +4,7 @@ import (
 	"flag"
 	"os"
 
+	"github.com/nats-io/nats.go"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -15,6 +16,7 @@ import (
 	etalbaasv1alpha1 "github.com/kou-etal/etalbaas/operator/api/v1alpha1"
 	"github.com/kou-etal/etalbaas/operator/internal/config"
 	"github.com/kou-etal/etalbaas/operator/internal/controller"
+	"github.com/kou-etal/etalbaas/operator/internal/natsadmin"
 )
 
 var (
@@ -57,19 +59,45 @@ func main() {
 
 	operatorConfig := config.DefaultConfig()
 
+	// Initialize NATS connection for stream/consumer management.
+	var natsAdmin *natsadmin.NATSAdmin
+	if operatorConfig.NATSEndpoint != "" {
+		natsURL := "nats://" + operatorConfig.NATSEndpoint
+		nc, err := nats.Connect(natsURL,
+			nats.Name("etalbaas-operator"),
+			nats.RetryOnFailedConnect(true),
+			nats.MaxReconnects(-1),
+		)
+		if err != nil {
+			setupLog.Error(err, "unable to connect to NATS", "url", natsURL)
+			os.Exit(1)
+		}
+		defer nc.Close()
+
+		js, err := nc.JetStream()
+		if err != nil {
+			setupLog.Error(err, "unable to create JetStream context")
+			os.Exit(1)
+		}
+		natsAdmin = natsadmin.New(js)
+		setupLog.Info("connected to NATS JetStream", "endpoint", operatorConfig.NATSEndpoint)
+	}
+
 	if err := (&controller.ProjectReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-		Config: operatorConfig,
+		Client:    mgr.GetClient(),
+		Scheme:    mgr.GetScheme(),
+		Config:    operatorConfig,
+		NATSAdmin: natsAdmin,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Project")
 		os.Exit(1)
 	}
 
 	if err := (&controller.FunctionReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-		Config: operatorConfig,
+		Client:    mgr.GetClient(),
+		Scheme:    mgr.GetScheme(),
+		Config:    operatorConfig,
+		NATSAdmin: natsAdmin,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Function")
 		os.Exit(1)

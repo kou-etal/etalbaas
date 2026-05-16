@@ -1,17 +1,22 @@
 package resources
 
 import (
+	"log/slog"
+
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	etalbaasv1alpha1 "github.com/kou-etal/etalbaas/operator/api/v1alpha1"
+	"github.com/kou-etal/etalbaas/operator/internal/config"
+	"github.com/kou-etal/etalbaas/operator/internal/natsadmin"
 )
 
 // DesiredFunctionDeployment builds the desired Deployment for a Function workload.
 // Returns nil for heavy-job functions (they use Job templates, not Deployments).
-func DesiredFunctionDeployment(fn *etalbaasv1alpha1.Function, imageRef string) *appsv1.Deployment {
+func DesiredFunctionDeployment(fn *etalbaasv1alpha1.Function, imageRef string, cfg config.OperatorConfig) *appsv1.Deployment {
 	if fn.Spec.Kind == etalbaasv1alpha1.FunctionKindHeavyJob {
 		return nil
 	}
@@ -24,7 +29,7 @@ func DesiredFunctionDeployment(fn *etalbaasv1alpha1.Function, imageRef string) *
 	selectorLabels := functionSelectorLabels(projectID, funcName)
 
 	replicas := resolveReplicas(fn)
-	podSpec := buildFunctionPodSpec(fn, imageRef)
+	podSpec := buildFunctionPodSpec(fn, imageRef, cfg)
 
 	return &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
@@ -48,7 +53,7 @@ func DesiredFunctionDeployment(fn *etalbaasv1alpha1.Function, imageRef string) *
 }
 
 // buildFunctionPodSpec builds the PodSpec for a function workload.
-func buildFunctionPodSpec(fn *etalbaasv1alpha1.Function, imageRef string) corev1.PodSpec {
+func buildFunctionPodSpec(fn *etalbaasv1alpha1.Function, imageRef string, cfg config.OperatorConfig) corev1.PodSpec {
 	container := corev1.Container{
 		Name:  "function",
 		Image: imageRef,
@@ -80,6 +85,66 @@ func buildFunctionPodSpec(fn *etalbaasv1alpha1.Function, imageRef string) corev1
 				Type: corev1.SeccompProfileTypeRuntimeDefault,
 			},
 		},
+	}
+
+	// Inject NATS sidecar for DatabaseChange triggers.
+	if HasDatabaseChangeTrigger(fn) && cfg.NATSSidecarImage == "" {
+		slog.Warn("NATSSidecarImage not configured, skipping sidecar injection",
+			"function", fn.Name, "namespace", fn.Namespace)
+	}
+	if HasDatabaseChangeTrigger(fn) && cfg.NATSSidecarImage != "" {
+		projectID := fn.Spec.ProjectRef.Name
+		var sidecarUID int64 = 65532
+		sidecar := corev1.Container{
+			Name:  "nats-sidecar",
+			Image: cfg.NATSSidecarImage,
+			Env: []corev1.EnvVar{
+				{Name: "SIDECAR_NATS_URL", Value: "nats://" + cfg.NATSEndpoint},
+				{Name: "SIDECAR_STREAM", Value: natsadmin.StreamName(projectID)},
+				{Name: "SIDECAR_CONSUMER", Value: natsadmin.ConsumerName(fn.Name)},
+				{Name: "SIDECAR_FUNCTION_URL", Value: "http://localhost:8080/invoke"},
+			},
+			SecurityContext: &corev1.SecurityContext{
+				AllowPrivilegeEscalation: boolPtr(false),
+				ReadOnlyRootFilesystem:   boolPtr(true),
+				RunAsNonRoot:             &trueVal,
+				RunAsUser:                &sidecarUID,
+				Capabilities: &corev1.Capabilities{
+					Drop: []corev1.Capability{"ALL"},
+				},
+			},
+			LivenessProbe: &corev1.Probe{
+				ProbeHandler: corev1.ProbeHandler{
+					HTTPGet: &corev1.HTTPGetAction{
+						Path: "/healthz",
+						Port: intstr.FromInt32(8081),
+					},
+				},
+				InitialDelaySeconds: 5,
+				PeriodSeconds:       15,
+			},
+			ReadinessProbe: &corev1.Probe{
+				ProbeHandler: corev1.ProbeHandler{
+					HTTPGet: &corev1.HTTPGetAction{
+						Path: "/healthz",
+						Port: intstr.FromInt32(8081),
+					},
+				},
+				InitialDelaySeconds: 3,
+				PeriodSeconds:       10,
+			},
+			Resources: corev1.ResourceRequirements{
+				Requests: corev1.ResourceList{
+					corev1.ResourceCPU:    resource.MustParse("25m"),
+					corev1.ResourceMemory: resource.MustParse("32Mi"),
+				},
+				Limits: corev1.ResourceList{
+					corev1.ResourceCPU:    resource.MustParse("100m"),
+					corev1.ResourceMemory: resource.MustParse("64Mi"),
+				},
+			},
+		}
+		podSpec.Containers = append(podSpec.Containers, sidecar)
 	}
 
 	// RuntimeClass: gVisor by default, nvidia for self-managed GPU
