@@ -1,13 +1,15 @@
 go 1.26.0
 
 use (
-	./proto
-	./pkg
-	./services/tenant-user
-	./services/project
-	./services/function
-	./services/event
-	./services/cdc-pod
-	./services/nats-sidecar
 	./operator
+	./pkg
+	./proto
+	./services/cdc-pod
+	./services/event
+	./services/function
+	./services/nats-sidecar
+	./services/project
+	./services/storage
+	./services/tenant-user
+	./storage-providers
 )
