@@ -1,6 +1,8 @@
 package resources
 
 import (
+	"fmt"
+
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
@@ -97,8 +99,8 @@ func DesiredCloudNativePGCluster(project *etalbaasv1alpha1.Project) *unstructure
 				"labels":    toUnstructuredLabels(ComponentLabels(projectID, userID, plan, "postgres")),
 			},
 			"spec": map[string]interface{}{
-				"instances":    replicas,
-				"imageName":    "ghcr.io/cloudnative-pg/postgresql:" + version,
+				"instances":             replicas,
+				"imageName":             "ghcr.io/cloudnative-pg/postgresql:" + version,
 				"primaryUpdateStrategy": "unsupervised",
 				"storage": map[string]interface{}{
 					"size": storage,
@@ -116,9 +118,28 @@ func DesiredCloudNativePGCluster(project *etalbaasv1alpha1.Project) *unstructure
 				"postgresql": buildPostgresqlSection(pgParameters, sharedPreloadLibraries),
 				"bootstrap": map[string]interface{}{
 					"initdb": map[string]interface{}{
-						"database": "postgres",
-						"owner":    "app",
+						"database":    "postgres",
+						"owner":       "app",
 						"postInitSQL": buildPostInitSQL(pg.Extensions),
+						"postInitApplicationSQL": []interface{}{
+							fmt.Sprintf("CREATE PUBLICATION cdc_%s FOR ALL TABLES", projectID),
+						},
+					},
+				},
+				// CDC dedicated user: REPLICATION + pg_read_all_data (SELECT on all tables).
+				// Avoids using superuser for CDC Pod — limits blast radius.
+				"managed": map[string]interface{}{
+					"roles": []interface{}{
+						map[string]interface{}{
+							"name":        "cdc",
+							"ensure":      "present",
+							"login":       true,
+							"replication": true,
+							"inRoles":     []interface{}{"pg_read_all_data"},
+							"passwordSecret": map[string]interface{}{
+								"name": "db-cdc",
+							},
+						},
 					},
 				},
 			},

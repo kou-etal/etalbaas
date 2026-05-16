@@ -83,14 +83,14 @@ func DesiredCDCDeployment(project *etalbaasv1alpha1.Project, cfg config.Operator
 								},
 								{
 									Name:  "CDC_NATS_SUBJECT_PREFIX",
-									Value: "events." + projectID,
+									Value: "events.database",
 								},
 								{
 									Name: "CDC_DB_HOST",
 									ValueFrom: &corev1.EnvVarSource{
 										SecretKeyRef: &corev1.SecretKeySelector{
 											LocalObjectReference: corev1.LocalObjectReference{
-												Name: "db-app",
+												Name: "db-cdc",
 											},
 											Key: "host",
 										},
@@ -101,7 +101,7 @@ func DesiredCDCDeployment(project *etalbaasv1alpha1.Project, cfg config.Operator
 									ValueFrom: &corev1.EnvVarSource{
 										SecretKeyRef: &corev1.SecretKeySelector{
 											LocalObjectReference: corev1.LocalObjectReference{
-												Name: "db-app",
+												Name: "db-cdc",
 											},
 											Key: "username",
 										},
@@ -112,7 +112,7 @@ func DesiredCDCDeployment(project *etalbaasv1alpha1.Project, cfg config.Operator
 									ValueFrom: &corev1.EnvVarSource{
 										SecretKeyRef: &corev1.SecretKeySelector{
 											LocalObjectReference: corev1.LocalObjectReference{
-												Name: "db-app",
+												Name: "db-cdc",
 											},
 											Key: "password",
 										},
@@ -123,7 +123,7 @@ func DesiredCDCDeployment(project *etalbaasv1alpha1.Project, cfg config.Operator
 									ValueFrom: &corev1.EnvVarSource{
 										SecretKeyRef: &corev1.SecretKeySelector{
 											LocalObjectReference: corev1.LocalObjectReference{
-												Name: "db-app",
+												Name: "db-cdc",
 											},
 											Key: "dbname",
 										},
