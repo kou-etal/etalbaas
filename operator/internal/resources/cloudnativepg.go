@@ -202,10 +202,42 @@ func buildPostgresqlSection(params map[string]interface{}, sharedPreloadLibrarie
 }
 
 func buildPostInitSQL(extensions []string) []interface{} {
-	stmts := make([]interface{}, 0, len(extensions))
+	stmts := make([]interface{}, 0, len(extensions)+30)
 	for _, ext := range extensions {
 		stmts = append(stmts, "CREATE EXTENSION IF NOT EXISTS "+ext+";")
 	}
+
+	// Auth schema: roles + helper functions (Supabase-compatible).
+	// Required for PostgREST SET LOCAL ROLE and Storage MS RLS enforcement.
+	stmts = append(stmts,
+		"CREATE ROLE anon NOLOGIN;",
+		"CREATE ROLE authenticated NOLOGIN;",
+		"CREATE ROLE service_role NOLOGIN;",
+		"GRANT anon, authenticated, service_role TO app;",
+		"CREATE SCHEMA IF NOT EXISTS auth;",
+		`CREATE OR REPLACE FUNCTION auth.uid() RETURNS UUID LANGUAGE sql STABLE AS $$ SELECT NULLIF(current_setting('request.jwt.claims', true)::json->>'sub', '')::UUID $$;`,
+		`CREATE OR REPLACE FUNCTION auth.role() RETURNS TEXT LANGUAGE sql STABLE AS $$ SELECT NULLIF(current_setting('request.jwt.claims', true)::json->>'role', '') $$;`,
+		"GRANT USAGE ON SCHEMA auth TO anon, authenticated, service_role;",
+		"GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA auth TO anon, authenticated, service_role;",
+	)
+
+	// Storage schema: bucket/object metadata tables with RLS.
+	stmts = append(stmts,
+		"CREATE SCHEMA IF NOT EXISTS storage;",
+		"GRANT USAGE ON SCHEMA storage TO anon, authenticated, service_role;",
+		`CREATE TABLE IF NOT EXISTS storage.buckets (id TEXT PRIMARY KEY, name TEXT NOT NULL, project_id TEXT NOT NULL, access_level TEXT NOT NULL DEFAULT 'protected', file_size_limit BIGINT, allowed_mime_types TEXT[], created_at TIMESTAMPTZ NOT NULL DEFAULT now(), updated_at TIMESTAMPTZ NOT NULL DEFAULT now(), UNIQUE(project_id, name));`,
+		`CREATE TABLE IF NOT EXISTS storage.objects (id UUID DEFAULT gen_random_uuid() PRIMARY KEY, bucket_id TEXT NOT NULL REFERENCES storage.buckets(id) ON DELETE CASCADE, name TEXT NOT NULL, owner UUID, size BIGINT, mime_type TEXT, etag TEXT, metadata JSONB DEFAULT '{}', created_at TIMESTAMPTZ NOT NULL DEFAULT now(), updated_at TIMESTAMPTZ NOT NULL DEFAULT now(), UNIQUE(bucket_id, name));`,
+		"ALTER TABLE storage.buckets ENABLE ROW LEVEL SECURITY;",
+		"ALTER TABLE storage.objects ENABLE ROW LEVEL SECURITY;",
+		"GRANT SELECT ON ALL TABLES IN SCHEMA storage TO anon, authenticated;",
+		"GRANT INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA storage TO authenticated;",
+		"GRANT ALL ON ALL TABLES IN SCHEMA storage TO service_role;",
+		`CREATE POLICY "authenticated users can CRUD own objects" ON storage.objects FOR ALL USING (owner = auth.uid()) WITH CHECK (owner = auth.uid());`,
+		`CREATE POLICY "anon can read public bucket objects" ON storage.objects FOR SELECT USING (EXISTS (SELECT 1 FROM storage.buckets b WHERE b.id = bucket_id AND b.access_level = 'public'));`,
+		`CREATE POLICY "service_role bypass objects" ON storage.objects FOR ALL USING (auth.role() = 'service_role');`,
+		`CREATE POLICY "service_role bypass buckets" ON storage.buckets FOR ALL USING (auth.role() = 'service_role');`,
+	)
+
 	return stmts
 }
 
