@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -206,7 +207,7 @@ func TestKanikoBuildJob(t *testing.T) {
 
 func TestDesiredFunctionDeployment_LightDeployment(t *testing.T) {
 	fn := newTestFunction("my-func", "abc123", etalbaasv1alpha1.FunctionKindLightDeployment)
-	deploy := resources.DesiredFunctionDeployment(fn, "zot.example.com/project-abc123/my-func:1-abc")
+	deploy := resources.DesiredFunctionDeployment(fn, "zot.example.com/project-abc123/my-func:1-abc", config.DefaultConfig())
 
 	if deploy == nil {
 		t.Fatal("Expected Deployment for light-deployment")
@@ -239,7 +240,7 @@ func TestDesiredFunctionDeployment_LightDeployment(t *testing.T) {
 
 func TestDesiredFunctionDeployment_HeavyDeployment(t *testing.T) {
 	fn := newTestFunction("my-func", "abc123", etalbaasv1alpha1.FunctionKindHeavyDeployment)
-	deploy := resources.DesiredFunctionDeployment(fn, "zot.example.com/project-abc123/my-func:1-abc")
+	deploy := resources.DesiredFunctionDeployment(fn, "zot.example.com/project-abc123/my-func:1-abc", config.DefaultConfig())
 
 	if deploy == nil {
 		t.Fatal("Expected Deployment for heavy-deployment")
@@ -252,7 +253,7 @@ func TestDesiredFunctionDeployment_HeavyDeployment(t *testing.T) {
 
 func TestDesiredFunctionDeployment_HeavyJob_ReturnsNil(t *testing.T) {
 	fn := newTestFunction("my-func", "abc123", etalbaasv1alpha1.FunctionKindHeavyJob)
-	deploy := resources.DesiredFunctionDeployment(fn, "zot.example.com/project-abc123/my-func:1-abc")
+	deploy := resources.DesiredFunctionDeployment(fn, "zot.example.com/project-abc123/my-func:1-abc", config.DefaultConfig())
 
 	if deploy != nil {
 		t.Error("Expected nil Deployment for heavy-job")
@@ -267,7 +268,7 @@ func TestDesiredFunctionDeployment_GPUSelfManaged(t *testing.T) {
 			Provider: "self-managed",
 		}
 	})
-	deploy := resources.DesiredFunctionDeployment(fn, "zot.example.com/project-abc123/my-func:1-abc")
+	deploy := resources.DesiredFunctionDeployment(fn, "zot.example.com/project-abc123/my-func:1-abc", config.DefaultConfig())
 
 	if deploy == nil {
 		t.Fatal("Expected Deployment for GPU self-managed")
@@ -304,7 +305,7 @@ func TestDesiredFunctionDeployment_EnvVars(t *testing.T) {
 			{Name: "SECRET_VAR", SecretName: "my-secret"},
 		}
 	})
-	deploy := resources.DesiredFunctionDeployment(fn, "zot.example.com/project-abc123/my-func:1-abc")
+	deploy := resources.DesiredFunctionDeployment(fn, "zot.example.com/project-abc123/my-func:1-abc", config.DefaultConfig())
 
 	envVars := deploy.Spec.Template.Spec.Containers[0].Env
 
@@ -362,12 +363,41 @@ func TestDesiredHPA_HeavyDeployment_ReturnsNil(t *testing.T) {
 	}
 }
 
-func TestDesiredKEDAScaledObject_HeavyDeployment(t *testing.T) {
-	fn := newTestFunction("my-func", "abc123", etalbaasv1alpha1.FunctionKindHeavyDeployment)
-	so := resources.DesiredKEDAScaledObject(fn)
+func TestDesiredHTTPScaledObject_LightDeployment_ReturnsNil(t *testing.T) {
+	fn := newTestFunction("my-func", "abc123", etalbaasv1alpha1.FunctionKindLightDeployment)
+	hso := resources.DesiredHTTPScaledObject(fn, config.DefaultConfig())
+
+	if hso != nil {
+		t.Error("Expected nil HTTPScaledObject for light-deployment (should use HPA)")
+	}
+}
+
+func TestDesiredHTTPScaledObject_HeavyJob_ReturnsNil(t *testing.T) {
+	fn := newTestFunction("my-func", "abc123", etalbaasv1alpha1.FunctionKindHeavyJob)
+	hso := resources.DesiredHTTPScaledObject(fn, config.DefaultConfig())
+
+	if hso != nil {
+		t.Error("Expected nil HTTPScaledObject for heavy-job")
+	}
+}
+
+func TestDesiredKEDAScaledObject_HeavyDeployment_WithDBTrigger(t *testing.T) {
+	fn := newTestFunction("my-func", "abc123", etalbaasv1alpha1.FunctionKindHeavyDeployment, func(f *etalbaasv1alpha1.Function) {
+		f.Spec.Triggers = []etalbaasv1alpha1.TriggerSpec{
+			{
+				Type: "DatabaseChange",
+				DatabaseChange: &etalbaasv1alpha1.DatabaseChangeTrigger{
+					Table:      "orders",
+					Operations: []string{"INSERT", "UPDATE"},
+				},
+			},
+		}
+	})
+	cfg := config.DefaultConfig()
+	so := resources.DesiredKEDAScaledObject(fn, cfg)
 
 	if so == nil {
-		t.Fatal("Expected KEDA ScaledObject for heavy-deployment")
+		t.Fatal("Expected KEDA ScaledObject for heavy-deployment with DatabaseChange trigger")
 	}
 
 	if so.GetKind() != "ScaledObject" {
@@ -378,14 +408,117 @@ func TestDesiredKEDAScaledObject_HeavyDeployment(t *testing.T) {
 	if cooldown != 300 {
 		t.Errorf("Expected cooldownPeriod=300, got %d", cooldown)
 	}
+
+	// Verify min/max replicas
+	minReplicas, _, _ := unstructured.NestedInt64(so.Object, "spec", "minReplicaCount")
+	if minReplicas != 0 {
+		t.Errorf("Expected minReplicaCount=0, got %d", minReplicas)
+	}
+	maxReplicas, _, _ := unstructured.NestedInt64(so.Object, "spec", "maxReplicaCount")
+	if maxReplicas != 10 {
+		t.Errorf("Expected maxReplicaCount=10, got %d", maxReplicas)
+	}
+
+	// Verify scaleTargetRef
+	targetName, _, _ := unstructured.NestedString(so.Object, "spec", "scaleTargetRef", "name")
+	if targetName != "func-my-func" {
+		t.Errorf("Expected scaleTargetRef name func-my-func, got %s", targetName)
+	}
+
+	// Verify nats-jetstream trigger
+	triggers, _, _ := unstructured.NestedSlice(so.Object, "spec", "triggers")
+	if len(triggers) != 1 {
+		t.Fatalf("Expected 1 trigger, got %d", len(triggers))
+	}
+	triggerMap, ok := triggers[0].(map[string]interface{})
+	if !ok {
+		t.Fatal("Expected trigger to be a map")
+	}
+	if triggerMap["type"] != "nats-jetstream" {
+		t.Errorf("Expected trigger type nats-jetstream, got %v", triggerMap["type"])
+	}
+	meta, ok := triggerMap["metadata"].(map[string]interface{})
+	if !ok {
+		t.Fatal("Expected trigger metadata to be a map")
+	}
+	if meta["stream"] != "CDC-project-abc123" {
+		t.Errorf("Expected stream CDC-project-abc123, got %v", meta["stream"])
+	}
+	if meta["consumer"] != "func-my-func" {
+		t.Errorf("Expected consumer func-my-func, got %v", meta["consumer"])
+	}
+}
+
+func TestDesiredKEDAScaledObject_HeavyDeployment_NoDBTrigger_ReturnsNil(t *testing.T) {
+	fn := newTestFunction("my-func", "abc123", etalbaasv1alpha1.FunctionKindHeavyDeployment)
+	so := resources.DesiredKEDAScaledObject(fn, config.DefaultConfig())
+
+	if so != nil {
+		t.Error("Expected nil ScaledObject for heavy-deployment without DatabaseChange trigger")
+	}
 }
 
 func TestDesiredKEDAScaledObject_LightDeployment_ReturnsNil(t *testing.T) {
 	fn := newTestFunction("my-func", "abc123", etalbaasv1alpha1.FunctionKindLightDeployment)
-	so := resources.DesiredKEDAScaledObject(fn)
+	so := resources.DesiredKEDAScaledObject(fn, config.DefaultConfig())
 
 	if so != nil {
 		t.Error("Expected nil ScaledObject for light-deployment")
+	}
+}
+
+func TestDesiredHTTPScaledObject_HeavyDeployment_HttpOnly(t *testing.T) {
+	fn := newTestFunction("my-func", "abc123", etalbaasv1alpha1.FunctionKindHeavyDeployment, func(f *etalbaasv1alpha1.Function) {
+		f.Spec.Triggers = []etalbaasv1alpha1.TriggerSpec{
+			{
+				Type: "Http",
+				Http: &etalbaasv1alpha1.HttpTrigger{
+					Path: "/invoke",
+				},
+			},
+		}
+	})
+	cfg := config.DefaultConfig()
+	hso := resources.DesiredHTTPScaledObject(fn, cfg)
+
+	if hso == nil {
+		t.Fatal("Expected HTTPScaledObject for heavy-deployment with Http-only trigger")
+	}
+
+	if hso.GetKind() != "HTTPScaledObject" {
+		t.Errorf("Expected kind HTTPScaledObject, got %s", hso.GetKind())
+	}
+
+	// Verify min=0 for heavy-deployment
+	min, _, _ := unstructured.NestedInt64(hso.Object, "spec", "replicas", "min")
+	if min != 0 {
+		t.Errorf("Expected min replicas=0 for heavy-deployment, got %d", min)
+	}
+
+	max, _, _ := unstructured.NestedInt64(hso.Object, "spec", "replicas", "max")
+	if max != 10 {
+		t.Errorf("Expected max replicas=10, got %d", max)
+	}
+
+	// Verify host and pathPrefix
+	hosts, _, _ := unstructured.NestedStringSlice(hso.Object, "spec", "hosts")
+	if len(hosts) != 1 || !strings.Contains(hosts[0], "abc123") {
+		t.Errorf("Expected host containing abc123, got %v", hosts)
+	}
+
+	paths, _, _ := unstructured.NestedStringSlice(hso.Object, "spec", "pathPrefixes")
+	if len(paths) != 1 || paths[0] != "/functions/my-func/invoke" {
+		t.Errorf("Expected pathPrefix /functions/my-func/invoke, got %v", paths)
+	}
+
+	// Verify scaleTargetRef
+	deployTarget, _, _ := unstructured.NestedString(hso.Object, "spec", "scaleTargetRef", "deployment")
+	if deployTarget != "func-my-func" {
+		t.Errorf("Expected deployment target func-my-func, got %s", deployTarget)
+	}
+	port, _, _ := unstructured.NestedInt64(hso.Object, "spec", "scaleTargetRef", "port")
+	if port != 8080 {
+		t.Errorf("Expected port 8080, got %d", port)
 	}
 }
 
@@ -473,7 +606,7 @@ func TestFunctionReconcile_BuildSucceeded_CreatesDeployment(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	_, err := r.Reconcile(ctx, ctrl.Request{
+	result, err := r.Reconcile(ctx, ctrl.Request{
 		NamespacedName: types.NamespacedName{
 			Name:      "my-func",
 			Namespace: "project-abc123",
@@ -481,6 +614,11 @@ func TestFunctionReconcile_BuildSucceeded_CreatesDeployment(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("Reconcile failed: %v", err)
+	}
+
+	// Light-deployment should requeue because fake client Deployment has ReadyReplicas=0
+	if result.RequeueAfter == 0 && !result.Requeue {
+		t.Error("Expected requeue for light-deployment with ReadyReplicas=0")
 	}
 
 	// Verify Deployment was created
@@ -505,6 +643,15 @@ func TestFunctionReconcile_HeavyDeployment_CreatesScaledObject(t *testing.T) {
 	scheme := functionTestScheme()
 	project := newTestParentProject("abc123")
 	fn := newTestFunction("my-func", "abc123", etalbaasv1alpha1.FunctionKindHeavyDeployment, func(f *etalbaasv1alpha1.Function) {
+		f.Spec.Triggers = []etalbaasv1alpha1.TriggerSpec{
+			{
+				Type: "DatabaseChange",
+				DatabaseChange: &etalbaasv1alpha1.DatabaseChangeTrigger{
+					Table:      "orders",
+					Operations: []string{"INSERT"},
+				},
+			},
+		}
 		f.Status.Phase = etalbaasv1alpha1.FunctionPhaseReady
 		f.Status.ObservedGeneration = 1
 		f.Status.Build = &etalbaasv1alpha1.BuildStatus{
@@ -545,11 +692,85 @@ func TestFunctionReconcile_HeavyDeployment_CreatesScaledObject(t *testing.T) {
 		t.Errorf("Expected 0 replicas for heavy-deployment, got %d", *deploy.Spec.Replicas)
 	}
 
-	// Verify KEDA ScaledObject was created
+	// Verify KEDA ScaledObject was created (nats-jetstream for DatabaseChange trigger)
 	so := &unstructured.Unstructured{}
 	so.SetGroupVersionKind(schema.GroupVersionKind{Group: "keda.sh", Version: "v1alpha1", Kind: "ScaledObject"})
 	if err := fakeClient.Get(ctx, types.NamespacedName{Name: "func-my-func", Namespace: "project-abc123"}, so); err != nil {
 		t.Fatalf("Expected KEDA ScaledObject: %v", err)
+	}
+
+	// Verify NATS sidecar container was injected
+	if len(deploy.Spec.Template.Spec.Containers) < 2 {
+		t.Fatal("Expected NATS sidecar container to be injected")
+	}
+	sidecar := deploy.Spec.Template.Spec.Containers[1]
+	if sidecar.Name != "nats-sidecar" {
+		t.Errorf("Expected sidecar name nats-sidecar, got %s", sidecar.Name)
+	}
+}
+
+func TestFunctionReconcile_HeavyDeployment_HttpOnly_CreatesHTTPScaledObject(t *testing.T) {
+	scheme := functionTestScheme()
+	project := newTestParentProject("abc123")
+	fn := newTestFunction("my-func", "abc123", etalbaasv1alpha1.FunctionKindHeavyDeployment, func(f *etalbaasv1alpha1.Function) {
+		f.Spec.Triggers = []etalbaasv1alpha1.TriggerSpec{
+			{
+				Type: "Http",
+				Http: &etalbaasv1alpha1.HttpTrigger{
+					Path:           "/invoke",
+					Authentication: "apikey",
+				},
+			},
+		}
+		f.Status.Phase = etalbaasv1alpha1.FunctionPhaseReady
+		f.Status.ObservedGeneration = 1
+		f.Status.Build = &etalbaasv1alpha1.BuildStatus{
+			Status:   etalbaasv1alpha1.BuildStatusSucceeded,
+			ImageRef: "zot.platform-system.svc:5000/project-abc123/my-func:1-abc",
+		}
+	})
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(project, fn).
+		WithStatusSubresource(fn).
+		Build()
+
+	r := &FunctionReconciler{
+		Client: fakeClient,
+		Scheme: scheme,
+		Config: testConfig(),
+	}
+
+	ctx := context.Background()
+	_, err := r.Reconcile(ctx, ctrl.Request{
+		NamespacedName: types.NamespacedName{
+			Name:      "my-func",
+			Namespace: "project-abc123",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Reconcile failed: %v", err)
+	}
+
+	// Verify Deployment was created
+	deploy := &appsv1.Deployment{}
+	if err := fakeClient.Get(ctx, types.NamespacedName{Name: "func-my-func", Namespace: "project-abc123"}, deploy); err != nil {
+		t.Fatalf("Expected Deployment: %v", err)
+	}
+
+	// Verify HTTPScaledObject was created (not ScaledObject)
+	hso := &unstructured.Unstructured{}
+	hso.SetGroupVersionKind(schema.GroupVersionKind{Group: "http.keda.sh", Version: "v1alpha1", Kind: "HTTPScaledObject"})
+	if err := fakeClient.Get(ctx, types.NamespacedName{Name: "func-my-func", Namespace: "project-abc123"}, hso); err != nil {
+		t.Fatalf("Expected KEDA HTTPScaledObject: %v", err)
+	}
+
+	// Verify no ScaledObject was created
+	so := &unstructured.Unstructured{}
+	so.SetGroupVersionKind(schema.GroupVersionKind{Group: "keda.sh", Version: "v1alpha1", Kind: "ScaledObject"})
+	if err := fakeClient.Get(ctx, types.NamespacedName{Name: "func-my-func", Namespace: "project-abc123"}, so); !errors.IsNotFound(err) {
+		t.Error("Expected no ScaledObject for Http-only heavy-deployment")
 	}
 }
 
@@ -686,7 +907,9 @@ func TestFunctionReconcile_GPUSelfManaged(t *testing.T) {
 func TestFunctionReconcile_HTTPRoute(t *testing.T) {
 	scheme := functionTestScheme()
 	project := newTestParentProject("abc123")
-	fn := newTestFunction("my-func", "abc123", etalbaasv1alpha1.FunctionKindLightDeployment, func(f *etalbaasv1alpha1.Function) {
+
+	// Use heavy-deployment (min=0) to avoid Deployment readiness requeue in updateFunctionStatus.
+	fn := newTestFunction("my-func", "abc123", etalbaasv1alpha1.FunctionKindHeavyDeployment, func(f *etalbaasv1alpha1.Function) {
 		f.Status.Phase = etalbaasv1alpha1.FunctionPhaseReady
 		f.Status.ObservedGeneration = 1
 		f.Status.Build = &etalbaasv1alpha1.BuildStatus{
@@ -729,7 +952,7 @@ func TestFunctionReconcile_HTTPRoute(t *testing.T) {
 		t.Fatalf("Expected HTTPRoute: %v", err)
 	}
 
-	// Verify trigger status
+	// Verify trigger status (heavy-deployment skips readiness check for min=0)
 	var updated etalbaasv1alpha1.Function
 	_ = fakeClient.Get(ctx, types.NamespacedName{Name: "my-func", Namespace: "project-abc123"}, &updated)
 	if len(updated.Status.Triggers) != 1 {
@@ -772,26 +995,10 @@ func TestFunctionReconcile_NotFound(t *testing.T) {
 
 func assertContains(t *testing.T, s, substr string) {
 	t.Helper()
-	if !containsStr(s, substr) {
+	if !strings.Contains(s, substr) {
 		t.Errorf("Expected string to contain %q, but it didn't.\nString: %s", substr, s)
 	}
 }
 
-func containsStr(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsSubstring(s, substr))
-}
-
-func containsSubstring(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
-}
-
 // Ensure unused imports are used
-var (
-	_ = errors.IsNotFound
-	_ = resource.MustParse
-)
+var _ = resource.MustParse
