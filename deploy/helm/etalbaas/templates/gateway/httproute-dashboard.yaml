@@ -1,0 +1,65 @@
+{{- if .Values.gateway.enabled }}
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: etalbaas-dashboard-routes
+  namespace: {{ include "etalbaas.namespace" . }}
+  labels:
+    {{- include "etalbaas.labels" . | nindent 4 }}
+spec:
+  parentRefs:
+    - name: etalbaas-gateway
+      namespace: {{ include "etalbaas.namespace" . }}
+      sectionName: https-api
+  hostnames:
+    - "api.{{ include "etalbaas.baseDomain" . }}"
+  rules:
+    # Tenant-User Service
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /etalbaas.tenant.v1.TenantService
+      backendRefs:
+        - name: tenant-user
+          port: {{ .Values.services.common.port }}
+    # Project Service
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /etalbaas.project.v1.ProjectService
+      backendRefs:
+        - name: project
+          port: {{ .Values.services.common.port }}
+    # Secret Service (hosted by Project MS)
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /etalbaas.secret.v1.SecretService
+      backendRefs:
+        - name: project
+          port: {{ .Values.services.common.port }}
+    # Function Service
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /etalbaas.function.v1.FunctionService
+      backendRefs:
+        - name: function
+          port: {{ .Values.services.common.port }}
+    # Event Service
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /etalbaas.event.v1.EventService
+      backendRefs:
+        - name: event
+          port: {{ .Values.services.common.port }}
+    # Storage Service
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /etalbaas.storage.v1.StorageService
+      backendRefs:
+        - name: storage
+          port: {{ .Values.services.common.port }}
+{{- end }}
