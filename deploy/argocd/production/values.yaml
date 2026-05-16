@@ -1,0 +1,81 @@
+# Production environment overrides for EtalBaaS Helm chart
+global:
+  baseDomain: "etalbaas.example.com"  # TODO: Replace with actual domain
+  environment: "production"
+  imageRegistry: "registry.etalbaas.example.com"  # TODO: Replace with actual registry
+
+gateway:
+  replicas: 3
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+
+tenantUser:
+  replicas: 2
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+project:
+  replicas: 2
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+function:
+  replicas: 2
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+
+event:
+  replicas: 2
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+storage:
+  replicas: 2
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+certManager:
+  issuer:
+    email: "admin@etalbaas.example.com"  # TODO: Replace with actual email
+    server: "https://acme-v02.api.letsencrypt.org/directory"
+
+metadb:
+  internal:
+    instances: 3
+    storage:
+      size: 20Gi
+    backup:
+      enabled: true
+      schedule: "0 2 * * *"
+      retentionPolicy: "30d"
+      destinationPath: "s3://etalbaas-backups/metadb/"

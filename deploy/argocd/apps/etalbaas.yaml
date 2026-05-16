@@ -1,0 +1,25 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: etalbaas
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "5"
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/kou-etal/etalbaas
+    targetRevision: HEAD
+    path: deploy/helm/etalbaas
+    helm:
+      valueFiles:
+        - ../../argocd/production/values.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: etalbaas-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
