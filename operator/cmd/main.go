@@ -2,11 +2,14 @@ package main
 
 import (
 	"flag"
+	"net/http"
 	"os"
+	"time"
 
 	"github.com/nats-io/nats.go"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/client-go/kubernetes"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
@@ -17,6 +20,7 @@ import (
 	"github.com/kou-etal/etalbaas/operator/internal/config"
 	"github.com/kou-etal/etalbaas/operator/internal/controller"
 	"github.com/kou-etal/etalbaas/operator/internal/natsadmin"
+	gpuprovider "github.com/kou-etal/etalbaas/operator/internal/provider/gpu"
 )
 
 var (
@@ -93,11 +97,29 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Initialize GPU Factory if GPU features are enabled.
+	var gpuFactory *gpuprovider.Factory
+	if operatorConfig.GPU.Enabled {
+		k8sClient, err := kubernetes.NewForConfig(ctrl.GetConfigOrDie())
+		if err != nil {
+			setupLog.Error(err, "unable to create kubernetes client for GPU factory")
+			os.Exit(1)
+		}
+		gpuFactory = gpuprovider.NewFactory(
+			operatorConfig.GPU,
+			&http.Client{Timeout: 30 * time.Second},
+			k8sClient,
+			operatorConfig.PlatformNamespace,
+		)
+		setupLog.Info("GPU provider factory initialized", "defaultProvider", operatorConfig.GPU.DefaultProvider)
+	}
+
 	if err := (&controller.FunctionReconciler{
-		Client:    mgr.GetClient(),
-		Scheme:    mgr.GetScheme(),
-		Config:    operatorConfig,
-		NATSAdmin: natsAdmin,
+		Client:     mgr.GetClient(),
+		Scheme:     mgr.GetScheme(),
+		Config:     operatorConfig,
+		NATSAdmin:  natsAdmin,
+		GPUFactory: gpuFactory,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Function")
 		os.Exit(1)
