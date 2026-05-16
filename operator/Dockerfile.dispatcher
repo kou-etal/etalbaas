@@ -1,18 +1,13 @@
-FROM golang:1.26 AS builder
-ARG TARGETOS
-ARG TARGETARCH
+FROM golang:1.26-alpine AS builder
+WORKDIR /src
+COPY pkg/go.mod pkg/go.sum ./pkg/
+COPY operator/go.mod operator/go.sum ./operator/
+RUN cd operator && go mod download
+COPY pkg/ ./pkg/
+COPY operator/ ./operator/
+RUN cd operator && CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /dispatcher ./cmd/dispatcher/
 
-WORKDIR /workspace
-COPY go.mod go.sum ./
-RUN go mod download
-
-COPY cmd/ cmd/
-COPY api/ api/
-COPY internal/ internal/
-RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o dispatcher ./cmd/dispatcher/
-
-FROM gcr.io/distroless/static:nonroot
-WORKDIR /
-COPY --from=builder /workspace/dispatcher .
+FROM gcr.io/distroless/static-debian12
+COPY --from=builder /dispatcher /dispatcher
 USER 65532:65532
 ENTRYPOINT ["/dispatcher"]
