@@ -7,5 +7,7 @@ use (
 	./services/project
 	./services/function
 	./services/event
+	./services/cdc-pod
+	./services/nats-sidecar
 	./operator
 )

@@ -36,7 +36,7 @@ etalbaas/
 │   ├── function/
 │   ├── event/
 │   └── storage/
-├── operator/               # kubebuilder Operator (planned)
+├── operator/               # kubebuilder Operator (Project/Function CRDs)
 ├── dashboard/              # Next.js frontend (planned)
 ├── deploy/
 │   ├── helm/               # Self-host配布用 Chart
@@ -104,14 +104,19 @@ etalbaas/
 1. ~~メタDB スキーマ設計~~ → `docs/database.md` + `deploy/migrations/meta/`
 2. ~~Proto基盤~~ (buf.yaml, buf.gen.yaml, common.proto)
 3. ~~各ドメインProto~~ (tenant, project, function, event, storage)
-4. Service共通基盤 (go.work, pkg/)
-5. Gateway
-6. Tenant User MS
-7. Project MS
-8. Function MS
-9. Event MS
-10. Storage MS
-11. Platform Operator
-12. Providers (GPU/Storage/EventSource)
-13. Deploy (Helm/ArgoCD/kubespray)
-14. Dashboard（最後）
+4. ~~Service共通基盤~~ (go.work, pkg/)
+5. ~~Gateway~~
+6. ~~Tenant User MS~~
+7. ~~Project MS~~
+8. ~~Function MS~~
+9. ~~Event MS~~
+10. Storage MS — Phase 1 スキップ (Step 13 で実装)
+11. ~~Platform Operator~~ (Project/Function CRDs, Kaniko build, multi-tenant isolation)
+12. NATS JetStream 統合 + KEDA NATS Scaler
+13. Storage Provider + Storage MS (R2/MinIO)
+14. Function Auto-Build 完成度向上 + 実行経路動作確認
+15. GPU Provider 統合 (RunPod/Lambda Labs/さくら高火力)
+16. Envoy Gateway + Cloudflare DNS + Wildcard TLS
+17. Dashboard (Next.js)
+18. Integration Tests + Beta
+19. Production Deploy
