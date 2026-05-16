@@ -1,0 +1,23 @@
+{{- if .Values.services.tenantUser.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: tenant-user
+  namespace: {{ include "etalbaas.namespace" . }}
+  labels:
+    {{- include "etalbaas.serviceLabels" (dict "root" . "component" "tenant-user") | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: grpc
+      port: {{ .Values.services.common.port }}
+      targetPort: grpc
+      protocol: TCP
+    - name: metrics
+      port: {{ .Values.services.common.metricsPort }}
+      targetPort: metrics
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: tenant-user
+    {{- include "etalbaas.selectorLabels" . | nindent 4 }}
+{{- end }}

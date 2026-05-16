@@ -1,0 +1,38 @@
+{{- if .Values.services.function.enabled }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: function-sa
+  namespace: {{ include "etalbaas.namespace" . }}
+  labels:
+    {{- include "etalbaas.serviceLabels" (dict "root" . "component" "function") | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "etalbaas.namespace" . }}-function
+  labels:
+    {{- include "etalbaas.serviceLabels" (dict "root" . "component" "function") | nindent 4 }}
+rules:
+  - apiGroups: ["etalbaas.io"]
+    resources: ["functions"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  - apiGroups: ["etalbaas.io"]
+    resources: ["functions/status"]
+    verbs: ["get", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "etalbaas.namespace" . }}-function
+  labels:
+    {{- include "etalbaas.serviceLabels" (dict "root" . "component" "function") | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "etalbaas.namespace" . }}-function
+subjects:
+  - kind: ServiceAccount
+    name: function-sa
+    namespace: {{ include "etalbaas.namespace" . }}
+{{- end }}

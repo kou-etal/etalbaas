@@ -1,0 +1,23 @@
+{{- if .Values.services.function.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: function
+  namespace: {{ include "etalbaas.namespace" . }}
+  labels:
+    {{- include "etalbaas.serviceLabels" (dict "root" . "component" "function") | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: grpc
+      port: {{ .Values.services.common.port }}
+      targetPort: grpc
+      protocol: TCP
+    - name: metrics
+      port: {{ .Values.services.common.metricsPort }}
+      targetPort: metrics
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: function
+    {{- include "etalbaas.selectorLabels" . | nindent 4 }}
+{{- end }}
