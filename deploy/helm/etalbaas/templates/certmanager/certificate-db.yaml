@@ -1,0 +1,17 @@
+{{- if and .Values.certManager.enabled .Values.certManager.certificates.db.enabled }}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: wildcard-db
+  namespace: {{ include "etalbaas.namespace" . }}
+  labels:
+    {{- include "etalbaas.labels" . | nindent 4 }}
+spec:
+  secretName: wildcard-db-tls
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  dnsNames:
+    - "*.db.{{ include "etalbaas.baseDomain" . }}"
+    - "db.{{ include "etalbaas.baseDomain" . }}"
+{{- end }}
