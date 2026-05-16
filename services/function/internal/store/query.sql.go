@@ -432,3 +432,64 @@ func (q *Queries) UpdateFunction(ctx context.Context, arg UpdateFunctionParams) 
 	)
 	return i, err
 }
+
+const updateFunctionBuildStatus = `-- name: UpdateFunctionBuildStatus :one
+UPDATE functions
+SET status = $3,
+    build_image_ref = $4,
+    build_image_digest = $5,
+    build_duration_sec = $6,
+    last_built_at = $7,
+    updated_at = now()
+WHERE id = $1 AND project_id = $2 AND status != 'deleted'
+RETURNING id, project_id, name, display_name, kind, mode, source_type, source_config, source_storage_path, runtime_preset, runtime_requirements, runtime_dockerfile, timeout_sec, gpu_config, triggers, env_vars, status, build_image_ref, build_image_digest, build_duration_sec, last_built_at, created_at, updated_at
+`
+
+type UpdateFunctionBuildStatusParams struct {
+	ID               uuid.UUID
+	ProjectID        string
+	Status           string
+	BuildImageRef    *string
+	BuildImageDigest *string
+	BuildDurationSec *int32
+	LastBuiltAt      pgtype.Timestamptz
+}
+
+func (q *Queries) UpdateFunctionBuildStatus(ctx context.Context, arg UpdateFunctionBuildStatusParams) (Function, error) {
+	row := q.db.QueryRow(ctx, updateFunctionBuildStatus,
+		arg.ID,
+		arg.ProjectID,
+		arg.Status,
+		arg.BuildImageRef,
+		arg.BuildImageDigest,
+		arg.BuildDurationSec,
+		arg.LastBuiltAt,
+	)
+	var i Function
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Name,
+		&i.DisplayName,
+		&i.Kind,
+		&i.Mode,
+		&i.SourceType,
+		&i.SourceConfig,
+		&i.SourceStoragePath,
+		&i.RuntimePreset,
+		&i.RuntimeRequirements,
+		&i.RuntimeDockerfile,
+		&i.TimeoutSec,
+		&i.GpuConfig,
+		&i.Triggers,
+		&i.EnvVars,
+		&i.Status,
+		&i.BuildImageRef,
+		&i.BuildImageDigest,
+		&i.BuildDurationSec,
+		&i.LastBuiltAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}

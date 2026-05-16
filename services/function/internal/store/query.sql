@@ -55,6 +55,17 @@ RETURNING *;
 SELECT * FROM projects
 WHERE id = $1 AND tenant_id = $2 AND status != 'deleted';
 
+-- name: UpdateFunctionBuildStatus :one
+UPDATE functions
+SET status = $3,
+    build_image_ref = $4,
+    build_image_digest = $5,
+    build_duration_sec = $6,
+    last_built_at = $7,
+    updated_at = now()
+WHERE id = $1 AND project_id = $2 AND status != 'deleted'
+RETURNING *;
+
 -- name: ListInvocationsByFunctionID :many
 SELECT * FROM invocations
 WHERE function_id = sqlc.arg('function_id')

@@ -16,6 +16,7 @@ type Querier interface {
 	ListFunctionsByProjectID(ctx context.Context, arg ListFunctionsByProjectIDParams) ([]Function, error)
 	ListInvocationsByFunctionID(ctx context.Context, arg ListInvocationsByFunctionIDParams) ([]Invocation, error)
 	UpdateFunction(ctx context.Context, arg UpdateFunctionParams) (Function, error)
+	UpdateFunctionBuildStatus(ctx context.Context, arg UpdateFunctionBuildStatusParams) (Function, error)
 }
 
 var _ Querier = (*Queries)(nil)
