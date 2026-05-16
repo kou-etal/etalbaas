@@ -38,7 +38,6 @@ Selector labels (subset for matchLabels).
 */}}
 {{- define "etalbaas.selectorLabels" -}}
 app.kubernetes.io/instance: {{ .Release.Name }}
-app.kubernetes.io/part-of: etalbaas
 {{- end }}
 
 {{/*
@@ -83,7 +82,7 @@ Resolve full image reference for the operator.
 
 {{/*
 Common environment variables shared by all microservices.
-Provides PORT, METRICS_PORT, ENV, OTEL endpoint, JWT_SECRET, DATABASE_URL.
+Provides PORT, METRICS_PORT, ENV, OTEL endpoint, DATABASE_URL.
 */}}
 {{- define "etalbaas.commonEnv" -}}
 - name: PORT
@@ -94,11 +93,6 @@ Provides PORT, METRICS_PORT, ENV, OTEL endpoint, JWT_SECRET, DATABASE_URL.
   value: {{ .Values.global.environment | quote }}
 - name: OTEL_EXPORTER_OTLP_ENDPOINT
   value: {{ .Values.services.common.otelEndpoint | quote }}
-- name: JWT_SECRET
-  valueFrom:
-    secretKeyRef:
-      name: {{ .Values.secrets.platformSecretName }}
-      key: JWT_SECRET
 - name: DATABASE_URL
   valueFrom:
     secretKeyRef:
@@ -121,6 +115,7 @@ Container-level security context.
 {{- define "etalbaas.containerSecurityContext" -}}
 runAsNonRoot: true
 runAsUser: 65532
+runAsGroup: 65532
 readOnlyRootFilesystem: true
 allowPrivilegeEscalation: false
 capabilities:

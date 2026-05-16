@@ -6,5 +6,5 @@ metadata:
   labels:
     {{- include "etalbaas.labels" . | nindent 4 }}
 spec:
-  controllerName: {{ .Values.gateway.controllerName }}
+  controllerName: {{ .Values.gateway.controllerName | quote }}
 {{- end }}

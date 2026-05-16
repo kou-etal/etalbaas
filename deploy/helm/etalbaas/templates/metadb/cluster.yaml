@@ -15,8 +15,10 @@ spec:
       shared_buffers: "256MB"
       effective_cache_size: "512MB"
       wal_level: "logical"
+      max_replication_slots: "10"
+      max_wal_senders: "10"
     pg_hba:
-      - host all all 10.0.0.0/8 scram-sha-256
+      - hostssl all all 10.0.0.0/8 scram-sha-256
 
   storage:
     size: {{ .Values.metadb.internal.storage }}
@@ -35,6 +37,12 @@ spec:
   backup:
     barmanObjectStore:
       destinationPath: "s3://{{ .Values.metadb.internal.backup.bucket }}/platform/"
+      {{- if .Values.metadb.internal.backup.endpoint }}
+      endpointURL: {{ .Values.metadb.internal.backup.endpoint | quote }}
+      {{- end }}
+      {{- if .Values.metadb.internal.backup.region }}
+      s3Region: {{ .Values.metadb.internal.backup.region | quote }}
+      {{- end }}
       s3Credentials:
         accessKeyId:
           name: {{ .Values.metadb.internal.backup.credentialsSecret }}

@@ -30,7 +30,7 @@ rules:
     resources: ["services", "configmaps", "secrets", "pods"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: [""]
-    resources: ["resourcequotas"]
+    resources: ["resourcequotas", "limitranges"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: [""]
     resources: ["events"]

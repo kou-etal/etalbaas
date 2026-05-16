@@ -46,11 +46,11 @@ spec:
             - name: BASE_DOMAIN
               value: {{ .Values.global.baseDomain | quote }}
             - name: REGISTRY_ENDPOINT
-              value: {{ .Values.operator.config.registryEndpoint | quote }}
+              value: {{ printf "zot.%s.svc:5000" (include "etalbaas.namespace" .) | quote }}
             - name: NATS_ENDPOINT
-              value: {{ .Values.operator.config.natsEndpoint | quote }}
+              value: {{ printf "nats.%s.svc:4222" (include "etalbaas.namespace" .) | quote }}
             - name: NATS_MONITORING_ENDPOINT
-              value: {{ .Values.operator.config.natsMonitoringEndpoint | quote }}
+              value: {{ printf "nats.%s.svc:8222" (include "etalbaas.namespace" .) | quote }}
             - name: GATEWAY_NAME
               value: {{ .Values.operator.config.gatewayName | quote }}
             - name: GATEWAY_NAMESPACE
@@ -80,6 +80,16 @@ spec:
             {{- if .Values.gpu.enabled }}
             - name: GPU_DEFAULT_PROVIDER
               value: {{ .Values.gpu.defaultProvider | quote }}
+            {{- if .Values.gpu.providers.runpod.enabled }}
+            - name: GPU_RUNPOD_API_KEY_SECRET
+              value: {{ .Values.gpu.providers.runpod.apiKeySecret | quote }}
+            {{- end }}
+            {{- if .Values.gpu.providers.selfManaged.enabled }}
+            - name: GPU_SELF_MANAGED_RUNTIME_CLASS
+              value: {{ .Values.gpu.providers.selfManaged.runtimeClass | quote }}
+            - name: GPU_SELF_MANAGED_RESOURCE_LIMIT
+              value: {{ .Values.gpu.providers.selfManaged.resourceLimit | quote }}
+            {{- end }}
             {{- end }}
           securityContext:
             {{- include "etalbaas.containerSecurityContext" . | nindent 12 }}
