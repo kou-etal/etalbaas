@@ -1,0 +1,11 @@
+---
+# EtalBaaS - kubespray addons and firewall configuration
+
+# Additional firewall ports (platform services exposed to public)
+additional_open_ports:
+  - port: 80
+    protocol: tcp
+  - port: 443
+    protocol: tcp
+  - port: 5432
+    protocol: tcp

@@ -1,0 +1,5 @@
+---
+argocd_namespace: argocd
+root_app_path: "{{ playbook_dir }}/../../argocd/root-app.yaml"
+health_check_retries: 60
+health_check_delay: 10

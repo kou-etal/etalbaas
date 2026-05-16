@@ -1,0 +1,14 @@
+---
+- name: Create Cloudflare DNS A records
+  community.general.cloudflare_dns:
+    zone: "{{ base_domain }}"
+    record: "{{ item.name }}"
+    type: "{{ item.type }}"
+    value: "{{ item.value }}"
+    ttl: "{{ cloudflare_dns_ttl }}"
+    proxied: "{{ cloudflare_dns_proxied }}"
+    state: present
+    api_token: "{{ cloudflare_api_token }}"
+  loop: "{{ cloudflare_dns_records }}"
+  loop_control:
+    label: "{{ item.name }} → {{ item.value }}"

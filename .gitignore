@@ -46,3 +46,9 @@ REFACTOR_BACKLOG.md
 
 # Build artifacts
 operator/dispatcher.exe
+
+# Ansible Vault password (NEVER commit - store in password manager)
+deploy/post-install/.vault-password
+
+# kubespray clone (fetched via git clone -b v2.25.0)
+deploy/kubespray/kubespray/

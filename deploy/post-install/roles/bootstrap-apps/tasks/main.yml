@@ -1,0 +1,27 @@
+---
+- name: Apply Root Application (App of Apps)
+  kubernetes.core.k8s:
+    state: present
+    apply: true
+    src: "{{ root_app_path }}"
+
+- name: Wait for Root Application to be Synced and Healthy
+  kubernetes.core.k8s_info:
+    api_version: argoproj.io/v1alpha1
+    kind: Application
+    name: root
+    namespace: "{{ argocd_namespace }}"
+  register: root_app
+  until: >-
+    root_app.resources | length > 0 and
+    root_app.resources[0].status is defined and
+    root_app.resources[0].status.sync.status | default('') == "Synced" and
+    root_app.resources[0].status.health.status | default('') == "Healthy"
+  retries: "{{ health_check_retries }}"
+  delay: "{{ health_check_delay }}"
+
+- name: Display Root Application status
+  ansible.builtin.debug:
+    msg: >-
+      Root Application: sync={{ root_app.resources[0].status.sync.status }},
+      health={{ root_app.resources[0].status.health.status }}

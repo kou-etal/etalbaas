@@ -1,0 +1,63 @@
+---
+- name: Add Sealed Secrets Helm repository
+  kubernetes.core.helm_repository:
+    name: sealed-secrets
+    repo_url: https://bitnami-labs.github.io/sealed-secrets
+
+- name: Install Sealed Secrets Controller
+  kubernetes.core.helm:
+    name: sealed-secrets
+    chart_ref: sealed-secrets/sealed-secrets
+    chart_version: "{{ sealed_secrets_chart_version }}"
+    release_namespace: "{{ sealed_secrets_namespace }}"
+    create_namespace: true
+    wait: true
+    timeout: "5m0s"
+    values:
+      fullnameOverride: "{{ sealed_secrets_controller_name }}"
+
+- name: Inject Sealed Secrets private key from Ansible Vault
+  kubernetes.core.k8s:
+    state: present
+    apply: true
+    definition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: sealed-secrets-custom-key
+        namespace: "{{ sealed_secrets_namespace }}"
+        labels:
+          sealedsecrets.bitnami.com/sealed-secrets-key: active
+      type: kubernetes.io/tls
+      data:
+        tls.crt: "{{ sealed_secrets_tls_crt }}"
+        tls.key: "{{ sealed_secrets_tls_key }}"
+
+- name: Restart Sealed Secrets Controller to pick up new key
+  kubernetes.core.k8s:
+    state: present
+    apply: true
+    definition:
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: "{{ sealed_secrets_controller_name }}"
+        namespace: "{{ sealed_secrets_namespace }}"
+      spec:
+        template:
+          metadata:
+            annotations:
+              kubectl.kubernetes.io/restartedAt: "{{ ansible_date_time.iso8601 | default(lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ')) }}"
+
+- name: Wait for Sealed Secrets Controller to be ready
+  kubernetes.core.k8s_info:
+    api_version: apps/v1
+    kind: Deployment
+    name: "{{ sealed_secrets_controller_name }}"
+    namespace: "{{ sealed_secrets_namespace }}"
+  register: ss_deploy
+  until: >-
+    ss_deploy.resources | length > 0 and
+    ss_deploy.resources[0].status.readyReplicas | default(0) >= 1
+  retries: 30
+  delay: 5

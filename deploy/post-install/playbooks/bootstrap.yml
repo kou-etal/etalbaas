@@ -1,0 +1,35 @@
+---
+# EtalBaaS Post-Install Bootstrap
+#
+# Run after kubespray cluster.yml completes.
+# Installs: Sealed Secrets → ArgoCD → Root Application → Cloudflare DNS
+#
+# Usage:
+#   ansible-playbook playbooks/bootstrap.yml
+#
+# Prerequisites:
+#   - kubeconfig accessible (~/.kube/config or KUBECONFIG env)
+#   - group_vars/all/vault.yml encrypted with ansible-vault
+#   - .vault-password file present
+
+- name: EtalBaaS Platform Bootstrap
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    base_domain: "{{ lookup('env', 'ETALBAAS_DOMAIN') | default('yourdomain.com', true) }}"
+    platform_namespace: "platform-system"
+
+  roles:
+    - role: sealed-secrets
+      tags: [sealed-secrets]
+
+    - role: argocd
+      tags: [argocd]
+
+    - role: bootstrap-apps
+      tags: [bootstrap-apps]
+
+    - role: cloudflare-dns
+      tags: [cloudflare-dns]

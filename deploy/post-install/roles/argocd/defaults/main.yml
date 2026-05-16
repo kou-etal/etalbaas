@@ -1,0 +1,5 @@
+---
+argocd_namespace: argocd
+argocd_chart_version: "7.7.5"
+argocd_server_insecure: true
+argocd_ha_enabled: false
