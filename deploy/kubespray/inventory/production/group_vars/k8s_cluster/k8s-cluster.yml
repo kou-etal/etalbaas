@@ -48,6 +48,18 @@ node_taints:
 supplementary_addresses_in_ssl_keys:
   - "203.0.113.100"  # kube-vip VIP
 
+# kubelet resource reservation (prevent system OOM)
+kubelet_system_reserved: true
+kubelet_system_reserved_cpu: 100m
+kubelet_system_reserved_memory: 256Mi
+kubelet_system_reserved_ephemeral_storage: 1Gi
+
+# Eviction thresholds
+kubelet_eviction_hard:
+  memory.available: "100Mi"
+  nodefs.available: "10%"
+  imagefs.available: "15%"
+
 # Firewall: nftables with additional ports for platform services
 # kubespray manages inter-node ports (etcd, kubelet, Cilium) automatically.
 nftables_enabled: true

@@ -8,14 +8,34 @@ global:
 # Disable HA for Phase 1 (2-node cluster)
 controller:
   replicas: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
 server:
   replicas: 1
-  extraArgs:
-{% if argocd_server_insecure %}
-    - --insecure
-{% endif %}
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
 repoServer:
   replicas: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
 applicationSet:
   replicas: 1
 
@@ -25,34 +45,4 @@ configs:
     argocdServerAdminPassword: "{{ argocd_admin_password_hash }}"
   params:
     server.insecure: {{ argocd_server_insecure | lower }}
-  cm:
-    # Allow App of Apps pattern
-    resource.exclusions: ""
-    # Timeout for sync operations
     timeout.reconciliation: 180s
-
-# Resource limits for Phase 1
-controller:
-  resources:
-    requests:
-      cpu: 100m
-      memory: 256Mi
-    limits:
-      cpu: 500m
-      memory: 512Mi
-server:
-  resources:
-    requests:
-      cpu: 50m
-      memory: 128Mi
-    limits:
-      cpu: 200m
-      memory: 256Mi
-repoServer:
-  resources:
-    requests:
-      cpu: 50m
-      memory: 128Mi
-    limits:
-      cpu: 200m
-      memory: 256Mi

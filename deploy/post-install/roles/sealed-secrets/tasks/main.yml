@@ -32,6 +32,8 @@
       data:
         tls.crt: "{{ sealed_secrets_tls_crt }}"
         tls.key: "{{ sealed_secrets_tls_key }}"
+  no_log: true
+  when: sealed_secrets_tls_key is defined and sealed_secrets_tls_crt is defined
 
 - name: Restart Sealed Secrets Controller to pick up new key
   kubernetes.core.k8s:
@@ -47,7 +49,8 @@
         template:
           metadata:
             annotations:
-              kubectl.kubernetes.io/restartedAt: "{{ ansible_date_time.iso8601 | default(lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ')) }}"
+              kubectl.kubernetes.io/restartedAt: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ') }}"
+  when: sealed_secrets_tls_key is defined and sealed_secrets_tls_crt is defined
 
 - name: Wait for Sealed Secrets Controller to be ready
   kubernetes.core.k8s_info:
