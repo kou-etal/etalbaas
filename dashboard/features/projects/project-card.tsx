@@ -16,14 +16,23 @@ import { formatRelative } from "@/lib/utils/format";
 interface ProjectCardProps {
   project: {
     id: string;
-    name: string;
+    displayName: string;
     description: string;
     status: string;
-    region: string;
+    postgresEnabled?: boolean;
+    redisEnabled?: boolean;
+    postgrestEnabled?: boolean;
     createdAt: string;
-    functionCount?: number;
   };
   onDelete?: (id: string) => void;
+}
+
+function ServicePill({ label }: { label: string }) {
+  return (
+    <span className="inline-flex items-center rounded bg-muted px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground">
+      {label}
+    </span>
+  );
 }
 
 export function ProjectCard({ project, onDelete }: ProjectCardProps) {
@@ -36,8 +45,8 @@ export function ProjectCard({ project, onDelete }: ProjectCardProps) {
             <FolderKanban className="h-4 w-4 text-primary" />
           </div>
           <div>
-            <h3 className="font-medium leading-none">{project.name}</h3>
-            <p className="text-xs text-muted-foreground mt-1">{project.region}</p>
+            <h3 className="font-medium leading-none">{project.displayName}</h3>
+            <p className="text-xs text-muted-foreground mt-1">{project.id}</p>
           </div>
         </div>
         <DropdownMenu>
@@ -62,11 +71,18 @@ export function ProjectCard({ project, onDelete }: ProjectCardProps) {
         </DropdownMenu>
       </CardHeader>
       <CardContent>
+        <div className="flex items-center justify-between mb-3">
+          <StatusBadge status={project.status || "pending"} />
+        </div>
         <p className="text-sm text-muted-foreground line-clamp-2 mb-4">
           {project.description || "No description"}
         </p>
         <div className="flex items-center justify-between">
-          <StatusBadge status={project.status || "active"} />
+          <div className="flex gap-1.5">
+            {project.postgresEnabled && <ServicePill label="PG" />}
+            {project.redisEnabled && <ServicePill label="RD" />}
+            {project.postgrestEnabled && <ServicePill label="API" />}
+          </div>
           <span className="text-xs text-muted-foreground">
             {project.createdAt ? formatRelative(project.createdAt) : ""}
           </span>
