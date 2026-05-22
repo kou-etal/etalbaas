@@ -41,7 +41,7 @@ func NewEventService(q store.Querier) *EventService {
 type ListEventHistoryParams struct {
 	TenantID   uuid.UUID
 	ProjectID  string
-	FunctionID uuid.UUID
+	FunctionID *uuid.UUID
 
 	StatusFilter *string
 	Since        *time.Time
@@ -72,7 +72,7 @@ func (s *EventService) ListEventHistory(ctx context.Context, p ListEventHistoryP
 		until = pgtype.Timestamptz{Time: *p.Until, Valid: true}
 	}
 
-	var cursorTS interface{}
+	cursorTS := pgtype.Timestamptz{}
 	if p.CursorCreatedAt != nil {
 		cursorTS = pgtype.Timestamptz{Time: *p.CursorCreatedAt, Valid: true}
 	}
@@ -81,16 +81,32 @@ func (s *EventService) ListEventHistory(ctx context.Context, p ListEventHistoryP
 		cursorUUID = pgtype.UUID{Bytes: *p.CursorID, Valid: true}
 	}
 
-	rows, err := s.q.ListEventHistoryByFunctionID(ctx, store.ListEventHistoryByFunctionIDParams{
-		FunctionID:      p.FunctionID,
-		ProjectID:       p.ProjectID,
-		StatusFilter:    p.StatusFilter,
-		Since:           since,
-		Until:           until,
-		CursorCreatedAt: cursorTS,
-		CursorID:        cursorUUID,
-		PageSize:        p.Limit,
-	})
+	var (
+		rows []store.EventHistory
+		err  error
+	)
+	if p.FunctionID != nil {
+		rows, err = s.q.ListEventHistoryByFunctionID(ctx, store.ListEventHistoryByFunctionIDParams{
+			FunctionID:      *p.FunctionID,
+			ProjectID:       p.ProjectID,
+			StatusFilter:    p.StatusFilter,
+			Since:           since,
+			Until:           until,
+			CursorCreatedAt: cursorTS,
+			CursorID:        cursorUUID,
+			PageSize:        p.Limit,
+		})
+	} else {
+		rows, err = s.q.ListEventHistoryByProjectID(ctx, store.ListEventHistoryByProjectIDParams{
+			ProjectID:       p.ProjectID,
+			StatusFilter:    p.StatusFilter,
+			Since:           since,
+			Until:           until,
+			CursorCreatedAt: cursorTS,
+			CursorID:        cursorUUID,
+			PageSize:        p.Limit,
+		})
+	}
 	if err != nil {
 		return nil, wrapDBError(err, "list event history")
 	}

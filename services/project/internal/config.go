@@ -7,6 +7,8 @@ import (
 
 type Config struct {
 	config.BaseConfig
+	K8sEnabled        bool   `env:"K8S_ENABLED" envDefault:"true"`
+	PlatformNamespace string `env:"PLATFORM_NAMESPACE" envDefault:"platform-system"`
 }
 
 func NewConfig() (*Config, error) {

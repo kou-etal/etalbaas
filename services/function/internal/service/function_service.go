@@ -225,7 +225,7 @@ func (s *FunctionService) ListFunctions(ctx context.Context, tenantID uuid.UUID,
 	if limit > 101 {
 		limit = 101
 	}
-	var cursorTS interface{}
+	cursorTS := pgtype.Timestamptz{}
 	if cursorCreatedAt != nil {
 		cursorTS = pgtype.Timestamptz{Time: *cursorCreatedAt, Valid: true}
 	}
@@ -463,7 +463,7 @@ func (s *FunctionService) ListInvocations(ctx context.Context, p ListInvocations
 		until = pgtype.Timestamptz{Time: *p.Until, Valid: true}
 	}
 
-	var cursorTS interface{}
+	cursorTS := pgtype.Timestamptz{}
 	if p.CursorCreatedAt != nil {
 		cursorTS = pgtype.Timestamptz{Time: *p.CursorCreatedAt, Valid: true}
 	}

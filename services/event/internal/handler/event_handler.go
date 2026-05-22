@@ -29,9 +29,13 @@ func (h *EventHandler) ListEventHistory(ctx context.Context, req *connect.Reques
 		return nil, apperror.ToConnectError(apperror.New(apperror.CodeUnauthenticated, "user id not found"))
 	}
 
-	functionID, err := uuid.Parse(req.Msg.FunctionId)
-	if err != nil {
-		return nil, apperror.ToConnectError(apperror.New(apperror.CodeInvalidArgument, "invalid function_id"))
+	var functionID *uuid.UUID
+	if req.Msg.FunctionId != "" {
+		parsed, err := uuid.Parse(req.Msg.FunctionId)
+		if err != nil {
+			return nil, apperror.ToConnectError(apperror.New(apperror.CodeInvalidArgument, "invalid function_id"))
+		}
+		functionID = &parsed
 	}
 
 	msg := req.Msg

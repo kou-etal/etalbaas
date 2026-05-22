@@ -137,3 +137,68 @@ func (q *Queries) ListEventHistoryByFunctionID(ctx context.Context, arg ListEven
 	}
 	return items, nil
 }
+
+const listEventHistoryByProjectID = `-- name: ListEventHistoryByProjectID :many
+SELECT id, project_id, function_id, invocation_id, trigger_type, trigger_data, status, attempt_count, last_error, trace_id, created_at FROM event_history
+WHERE project_id = $1
+  AND ($2::text IS NULL OR status = $2)
+  AND ($3::timestamptz IS NULL OR created_at >= $3)
+  AND ($4::timestamptz IS NULL OR created_at <= $4)
+  AND (
+    $5::timestamptz IS NULL
+    OR created_at < $5::timestamptz
+    OR (created_at = $5::timestamptz AND id < $6)
+  )
+ORDER BY created_at DESC, id DESC
+LIMIT $7
+`
+
+type ListEventHistoryByProjectIDParams struct {
+	ProjectID       string
+	StatusFilter    *string
+	Since           pgtype.Timestamptz
+	Until           pgtype.Timestamptz
+	CursorCreatedAt pgtype.Timestamptz
+	CursorID        pgtype.UUID
+	PageSize        int32
+}
+
+func (q *Queries) ListEventHistoryByProjectID(ctx context.Context, arg ListEventHistoryByProjectIDParams) ([]EventHistory, error) {
+	rows, err := q.db.Query(ctx, listEventHistoryByProjectID,
+		arg.ProjectID,
+		arg.StatusFilter,
+		arg.Since,
+		arg.Until,
+		arg.CursorCreatedAt,
+		arg.CursorID,
+		arg.PageSize,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []EventHistory
+	for rows.Next() {
+		var i EventHistory
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProjectID,
+			&i.FunctionID,
+			&i.InvocationID,
+			&i.TriggerType,
+			&i.TriggerData,
+			&i.Status,
+			&i.AttemptCount,
+			&i.LastError,
+			&i.TraceID,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}

@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/kou-etal/etalbaas/pkg/apperror"
+	"github.com/kou-etal/etalbaas/pkg/k8s"
 	"github.com/kou-etal/etalbaas/services/project/internal/store"
 )
 
@@ -41,11 +42,12 @@ var allowedRoles = map[string]bool{
 }
 
 type ProjectService struct {
-	q store.Querier
+	q      store.Querier
+	crdMgr k8s.ProjectCRDManager
 }
 
-func NewProjectService(q store.Querier) *ProjectService {
-	return &ProjectService{q: q}
+func NewProjectService(q store.Querier, crdMgr k8s.ProjectCRDManager) *ProjectService {
+	return &ProjectService{q: q, crdMgr: crdMgr}
 }
 
 type CreateProjectParams struct {
@@ -105,6 +107,22 @@ func (s *ProjectService) CreateProject(ctx context.Context, p CreateProjectParam
 		}
 		return store.Project{}, wrapDBError(err, "create project")
 	}
+
+	// CRD creation: best-effort. Failure is logged; Operator will not reconcile until CRD exists.
+	if s.crdMgr != nil {
+		if err := s.crdMgr.CreateOrUpdate(ctx, k8s.ProjectCRDParams{
+			ProjectID:          projectID,
+			DisplayName:        p.DisplayName,
+			Description:        p.Description,
+			PostgresEnabled:    p.PostgresEnabled,
+			PostgresExtensions: p.PostgresExtensions,
+			RedisEnabled:       p.RedisEnabled,
+			PostgrestEnabled:   p.PostgrestEnabled,
+		}); err != nil {
+			slog.ErrorContext(ctx, "failed to create Project CRD", "project_id", projectID, "error", err)
+		}
+	}
+
 	return row, nil
 }
 
@@ -129,7 +147,7 @@ func (s *ProjectService) ListProjects(ctx context.Context, tenantID uuid.UUID, l
 	if limit > 101 {
 		limit = 101
 	}
-	var cursorTS interface{}
+	cursorTS := pgtype.Timestamptz{}
 	if cursorCreatedAt != nil {
 		cursorTS = pgtype.Timestamptz{Time: *cursorCreatedAt, Valid: true}
 	}
@@ -161,6 +179,14 @@ func (s *ProjectService) DeleteProject(ctx context.Context, tenantID uuid.UUID, 
 	if err != nil {
 		return store.Project{}, wrapDBError(err, "delete project")
 	}
+
+	// CRD deletion: best-effort.
+	if s.crdMgr != nil {
+		if err := s.crdMgr.Delete(ctx, projectID); err != nil {
+			slog.ErrorContext(ctx, "failed to delete Project CRD", "project_id", projectID, "error", err)
+		}
+	}
+
 	return row, nil
 }
 
@@ -305,7 +331,7 @@ func (s *ProjectService) ListApiKeys(ctx context.Context, tenantID uuid.UUID, pr
 	if limit > 101 {
 		limit = 101
 	}
-	var cursorTS interface{}
+	cursorTS := pgtype.Timestamptz{}
 	if cursorCreatedAt != nil {
 		cursorTS = pgtype.Timestamptz{Time: *cursorCreatedAt, Valid: true}
 	}

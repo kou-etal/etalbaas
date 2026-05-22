@@ -8,7 +8,7 @@ import (
 )
 
 func TestCreateProject_EmptyDisplayName(t *testing.T) {
-	svc := NewProjectService(nil)
+	svc := NewProjectService(nil, nil)
 	_, err := svc.CreateProject(t.Context(), CreateProjectParams{
 		DisplayName: "",
 	})
@@ -21,7 +21,7 @@ func TestCreateProject_EmptyDisplayName(t *testing.T) {
 }
 
 func TestCreateProject_DisplayNameTooLong(t *testing.T) {
-	svc := NewProjectService(nil)
+	svc := NewProjectService(nil, nil)
 	longName := make([]byte, maxDisplayNameLen+1)
 	for i := range longName {
 		longName[i] = 'a'
@@ -38,7 +38,7 @@ func TestCreateProject_DisplayNameTooLong(t *testing.T) {
 }
 
 func TestCreateProject_DescriptionTooLong(t *testing.T) {
-	svc := NewProjectService(nil)
+	svc := NewProjectService(nil, nil)
 	longDesc := make([]byte, maxDescriptionLen+1)
 	for i := range longDesc {
 		longDesc[i] = 'a'
@@ -56,7 +56,7 @@ func TestCreateProject_DescriptionTooLong(t *testing.T) {
 }
 
 func TestCreateProject_InvalidExtension(t *testing.T) {
-	svc := NewProjectService(nil)
+	svc := NewProjectService(nil, nil)
 	_, err := svc.CreateProject(t.Context(), CreateProjectParams{
 		DisplayName:        "test",
 		PostgresExtensions: []string{"invalid_ext"},
@@ -70,7 +70,7 @@ func TestCreateProject_InvalidExtension(t *testing.T) {
 }
 
 func TestCreateProject_PostgrestWithoutPostgres(t *testing.T) {
-	svc := NewProjectService(nil)
+	svc := NewProjectService(nil, nil)
 	_, err := svc.CreateProject(t.Context(), CreateProjectParams{
 		DisplayName:      "test",
 		PostgrestEnabled: true,
@@ -85,7 +85,7 @@ func TestCreateProject_PostgrestWithoutPostgres(t *testing.T) {
 }
 
 func TestCreateApiKey_EmptyName(t *testing.T) {
-	svc := NewProjectService(nil)
+	svc := NewProjectService(nil, nil)
 	_, err := svc.CreateApiKey(t.Context(), CreateApiKeyParams{
 		Name: "",
 		Role: "anon",
@@ -99,7 +99,7 @@ func TestCreateApiKey_EmptyName(t *testing.T) {
 }
 
 func TestCreateApiKey_NameTooLong(t *testing.T) {
-	svc := NewProjectService(nil)
+	svc := NewProjectService(nil, nil)
 	longName := make([]byte, maxApiKeyNameLen+1)
 	for i := range longName {
 		longName[i] = 'a'
@@ -117,7 +117,7 @@ func TestCreateApiKey_NameTooLong(t *testing.T) {
 }
 
 func TestCreateApiKey_InvalidRole(t *testing.T) {
-	svc := NewProjectService(nil)
+	svc := NewProjectService(nil, nil)
 	_, err := svc.CreateApiKey(t.Context(), CreateApiKeyParams{
 		Name: "my-key",
 		Role: "admin",
@@ -131,7 +131,7 @@ func TestCreateApiKey_InvalidRole(t *testing.T) {
 }
 
 func TestCreateApiKey_NegativeExpiresInDays(t *testing.T) {
-	svc := NewProjectService(nil)
+	svc := NewProjectService(nil, nil)
 	neg := int32(-1)
 	_, err := svc.CreateApiKey(t.Context(), CreateApiKeyParams{
 		Name:          "my-key",
@@ -147,7 +147,7 @@ func TestCreateApiKey_NegativeExpiresInDays(t *testing.T) {
 }
 
 func TestCreateProject_ExtensionsWithoutPostgres(t *testing.T) {
-	svc := NewProjectService(nil)
+	svc := NewProjectService(nil, nil)
 	_, err := svc.CreateProject(t.Context(), CreateProjectParams{
 		DisplayName:        "test",
 		PostgresEnabled:    false,

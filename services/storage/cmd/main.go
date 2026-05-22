@@ -57,14 +57,21 @@ func main() {
 	}
 	defer metaPool.Close()
 
-	// K8s client (in-cluster, for reading tenant DB secrets).
-	k8sCfg, err := rest.InClusterConfig()
-	if err != nil {
-		log.Fatal("k8s in-cluster config: ", err)
-	}
-	k8sClient, err := kubernetes.NewForConfig(k8sCfg)
-	if err != nil {
-		log.Fatal("k8s client: ", err)
+	// Pool provider (per-project tenant DB connections).
+	var poolProvider pool.Provider
+	if cfg.K8sEnabled {
+		k8sCfg, err := rest.InClusterConfig()
+		if err != nil {
+			log.Fatal("k8s in-cluster config: ", err)
+		}
+		k8sClient, err := kubernetes.NewForConfig(k8sCfg)
+		if err != nil {
+			log.Fatal("k8s client: ", err)
+		}
+		poolProvider = pool.NewManager(k8sClient)
+	} else {
+		poolProvider = pool.NewStaticProvider(metaPool)
+		slog.Warn("K8S_ENABLED=false: using static DB pool (no per-project routing)")
 	}
 
 	// S3-compatible storage provider.
@@ -83,14 +90,12 @@ func main() {
 		log.Fatal("ensure s3 bucket: ", err)
 	}
 
-	// Pool Manager (per-project tenant DB connections).
-	poolMgr := pool.NewManager(k8sClient)
-	defer poolMgr.Close()
+	defer poolProvider.Close()
 
 	// Services.
 	metaQ := metastore.New(metaPool)
-	bucketSvc := service.NewBucketService(metaQ, poolMgr)
-	objectSvc := service.NewObjectService(poolMgr, s3Provider)
+	bucketSvc := service.NewBucketService(metaQ, poolProvider)
+	objectSvc := service.NewObjectService(poolProvider, s3Provider)
 
 	// gRPC handler (bucket CRUD).
 	bucketHandler := handler.NewBucketHandler(bucketSvc)

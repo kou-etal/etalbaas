@@ -18,6 +18,9 @@ type Config struct {
 	S3SecretKey string `env:"S3_SECRET_KEY" envDefault:""`
 	S3Region    string `env:"S3_REGION"     envDefault:"auto"`
 	S3UseSSL    bool   `env:"S3_USE_SSL"    envDefault:"true"`
+
+	// K8s toggle — when false, uses static pool (no per-project routing).
+	K8sEnabled bool `env:"K8S_ENABLED" envDefault:"true"`
 }
 
 func NewConfig() (*Config, error) {

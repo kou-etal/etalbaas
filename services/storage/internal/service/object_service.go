@@ -30,11 +30,11 @@ const (
 )
 
 type ObjectService struct {
-	poolMgr  *pool.Manager
+	poolMgr  pool.Provider
 	provider storageproviders.ObjectStorage
 }
 
-func NewObjectService(poolMgr *pool.Manager, provider storageproviders.ObjectStorage) *ObjectService {
+func NewObjectService(poolMgr pool.Provider, provider storageproviders.ObjectStorage) *ObjectService {
 	return &ObjectService{poolMgr: poolMgr, provider: provider}
 }
 

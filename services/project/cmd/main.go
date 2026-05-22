@@ -50,14 +50,29 @@ func main() {
 	}
 	defer pool.Close()
 
-	k8sClient, err := k8s.NewClient()
-	if err != nil {
-		log.Fatal(err)
+	var secMgr k8s.SecretManager
+	var crdMgr k8s.ProjectCRDManager
+	if cfg.K8sEnabled {
+		k8sClient, err := k8s.NewClient()
+		if err != nil {
+			log.Fatal(err)
+		}
+		secMgr = k8s.NewSecretManager(k8sClient)
+
+		dynClient, err := k8s.NewDynamicClient()
+		if err != nil {
+			log.Fatal("create k8s dynamic client:", err)
+		}
+		crdMgr = k8s.NewProjectCRDManager(dynClient, cfg.PlatformNamespace)
+		slog.Info("K8s Project CRD manager enabled", "namespace", cfg.PlatformNamespace)
+	} else {
+		secMgr = k8s.NoopSecretManager{}
+		crdMgr = k8s.NoopProjectCRDManager{}
+		slog.Warn("K8S_ENABLED=false: secrets stored in metadata only")
 	}
-	secMgr := k8s.NewSecretManager(k8sClient)
 
 	q := store.New(pool)
-	projectSvc := service.NewProjectService(q)
+	projectSvc := service.NewProjectService(q, crdMgr)
 	secretSvc := service.NewSecretService(q, secMgr)
 
 	projectHandler := handler.NewProjectHandler(projectSvc)

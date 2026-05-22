@@ -17,10 +17,10 @@ import (
 
 type BucketService struct {
 	meta    metastore.Querier
-	poolMgr *pool.Manager
+	poolMgr pool.Provider
 }
 
-func NewBucketService(meta metastore.Querier, poolMgr *pool.Manager) *BucketService {
+func NewBucketService(meta metastore.Querier, poolMgr pool.Provider) *BucketService {
 	return &BucketService{meta: meta, poolMgr: poolMgr}
 }
 

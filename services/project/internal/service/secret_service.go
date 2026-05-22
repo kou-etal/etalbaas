@@ -99,7 +99,7 @@ func (s *SecretService) ListSecrets(ctx context.Context, tenantID uuid.UUID, pro
 	if limit > 101 {
 		limit = 101
 	}
-	var cursorTS interface{}
+	cursorTS := pgtype.Timestamptz{}
 	if cursorCreatedAt != nil {
 		cursorTS = pgtype.Timestamptz{Time: *cursorCreatedAt, Valid: true}
 	}

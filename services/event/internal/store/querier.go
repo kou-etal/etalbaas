@@ -12,6 +12,7 @@ type Querier interface {
 	GetEventByID(ctx context.Context, arg GetEventByIDParams) (EventHistory, error)
 	GetProjectByIDAndTenantID(ctx context.Context, arg GetProjectByIDAndTenantIDParams) (Project, error)
 	ListEventHistoryByFunctionID(ctx context.Context, arg ListEventHistoryByFunctionIDParams) ([]EventHistory, error)
+	ListEventHistoryByProjectID(ctx context.Context, arg ListEventHistoryByProjectIDParams) ([]EventHistory, error)
 }
 
 var _ Querier = (*Queries)(nil)

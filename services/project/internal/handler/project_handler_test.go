@@ -178,7 +178,7 @@ func injectUserID() connect.UnaryInterceptorFunc {
 
 func setupProjectTestServer(t *testing.T, q store.Querier) (projectv1connect.ProjectServiceClient, func()) {
 	t.Helper()
-	svc := service.NewProjectService(q)
+	svc := service.NewProjectService(q, nil)
 	h := handler.NewProjectHandler(svc)
 	path, hnd := projectv1connect.NewProjectServiceHandler(h,
 		connect.WithInterceptors(injectUserID()),
