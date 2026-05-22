@@ -68,6 +68,16 @@ etalbaas/
 - DB: sqlc (SQL → Go codegen), golang-migrate
 - Phase 1: Free plan only, no billing, cron未実装
 
+## Dashboard migration (point.txt)
+
+HTML モックアップ → Next.js 移植の手順:
+
+1. **ベタ移植**: モックアップ HTML/CSS/SVG を1ピクセルも変えずに page.tsx + globals.css にそのまま貼る
+2. **完全再現を確認**: ビルド通し、ブラウザで見た目が100%一致することを確認
+3. **段階的にコンポーネント分割**: ユーザーの指示が出てから分割に着手
+
+詳細ルールは `point.txt` を参照。デザイン改変・アイコン差し替え・省略は一切禁止。
+
 ## Workflow
 
 - Language: respond in Japanese, code/variables in English
@@ -123,4 +133,5 @@ etalbaas/
 18. Dashboard (Next.js)
 19. Integration Tests + Beta
 20. Production Deploy
+
 
