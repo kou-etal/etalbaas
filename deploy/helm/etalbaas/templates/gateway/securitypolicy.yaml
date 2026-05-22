@@ -11,6 +11,22 @@ spec:
     group: gateway.networking.k8s.io
     kind: HTTPRoute
     name: etalbaas-dashboard-routes
+  cors:
+    allowOrigins:
+      - "https://dashboard.{{ include "etalbaas.baseDomain" . }}"
+    allowMethods:
+      - POST
+      - GET
+      - OPTIONS
+    allowHeaders:
+      - content-type
+      - authorization
+      - connect-protocol-version
+    exposeHeaders:
+      - grpc-status
+      - grpc-message
+    maxAge: 86400s
+    allowCredentials: true
   jwt:
     providers:
       - name: gotrue

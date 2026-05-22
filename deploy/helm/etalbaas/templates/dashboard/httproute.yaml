@@ -10,9 +10,9 @@ spec:
   parentRefs:
     - name: {{ .Values.operator.config.gatewayName | default "etalbaas-gateway" }}
       namespace: {{ .Values.operator.config.gatewayNamespace | default (include "etalbaas.namespace" .) }}
-      sectionName: https
+      sectionName: https-dashboard
   hostnames:
-    - "app.{{ .Values.global.baseDomain }}"
+    - "dashboard.{{ .Values.global.baseDomain }}"
   rules:
     - matches:
         - path:

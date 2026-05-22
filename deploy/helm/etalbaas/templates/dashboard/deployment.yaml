@@ -24,13 +24,15 @@ spec:
         {{- include "etalbaas.podSecurityContext" . | nindent 8 }}
       containers:
         - name: dashboard
-          image: {{ include "etalbaas.imageRef" (dict "root" . "svc" "dashboard" "name" "etalbaas-dashboard") }}
+          image: {{ .Values.dashboard.image.repository | default (printf "%s/etalbaas-dashboard" .Values.global.imageRegistry) }}:{{ .Values.dashboard.image.tag | default "latest" }}
           imagePullPolicy: {{ .Values.global.imagePullPolicy }}
           ports:
             - name: http
               containerPort: 8080
               protocol: TCP
           env:
+            - name: HOSTNAME
+              value: "0.0.0.0"
             - name: NEXT_PUBLIC_API_URL
               value: "https://api.{{ .Values.global.baseDomain }}"
             - name: NEXT_PUBLIC_GOTRUE_URL

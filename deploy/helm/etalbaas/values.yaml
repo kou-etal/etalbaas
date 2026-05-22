@@ -193,6 +193,38 @@ metadb:
     enabled: true
     image: "migrate/migrate:v4.16.2"
 
+# ─── GoTrue (Dev Auth) ──────────────────────────────────────────────────────
+gotrue:
+  enabled: true
+  image:
+    repository: "supabase/gotrue"
+    tag: "v2.164.0"
+  replicaCount: 1
+  externalUrl: "https://auth.yourdomain.com"
+  siteUrl: "https://dashboard.yourdomain.com"
+  jwt:
+    exp: 3600
+    useAsymmetric: true
+  disableSignup: false
+  email:
+    enabled: true
+    autoconfirm: true
+  github:
+    enabled: false
+    clientId: ""
+    redirectUri: ""
+  google:
+    enabled: false
+    clientId: ""
+    redirectUri: ""
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
 # ─── Auth / JWT ──────────────────────────────────────────────────────────────
 auth:
   jwt:

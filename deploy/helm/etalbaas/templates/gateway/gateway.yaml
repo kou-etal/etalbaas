@@ -59,6 +59,22 @@ spec:
         namespaces:
           from: Same
 
+    # HTTPS: auth.{domain} (GoTrue)
+    {{- if .Values.gotrue.enabled }}
+    - name: https-auth
+      protocol: HTTPS
+      port: {{ .Values.gateway.listeners.https.port }}
+      hostname: "auth.{{ include "etalbaas.baseDomain" . }}"
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - name: wildcard-api-tls
+            namespace: {{ include "etalbaas.namespace" . }}
+      allowedRoutes:
+        namespaces:
+          from: Same
+    {{- end }}
+
     # TLS Passthrough: *.db.{domain} (PostgreSQL SNI routing)
     - name: postgres-tls
       protocol: TLS

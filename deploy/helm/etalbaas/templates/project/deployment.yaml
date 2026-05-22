@@ -36,6 +36,10 @@ spec:
               protocol: TCP
           env:
             {{- include "etalbaas.commonEnv" . | nindent 12 }}
+            - name: K8S_ENABLED
+              value: {{ .Values.services.project.k8sEnabled | default "true" | quote }}
+            - name: PLATFORM_NAMESPACE
+              value: {{ include "etalbaas.namespace" . | quote }}
           securityContext:
             {{- include "etalbaas.containerSecurityContext" . | nindent 12 }}
           resources:
@@ -48,7 +52,7 @@ spec:
             periodSeconds: 15
           readinessProbe:
             httpGet:
-              path: /readyz
+              path: /healthz
               port: grpc
             initialDelaySeconds: 3
             periodSeconds: 10

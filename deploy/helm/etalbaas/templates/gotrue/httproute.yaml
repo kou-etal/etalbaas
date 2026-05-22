@@ -1,0 +1,24 @@
+{{- if .Values.gotrue.enabled }}
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: gotrue
+  namespace: {{ include "etalbaas.namespace" . }}
+  labels:
+    {{- include "etalbaas.serviceLabels" (dict "root" . "component" "gotrue") | nindent 4 }}
+spec:
+  parentRefs:
+    - name: etalbaas-gateway
+      namespace: {{ include "etalbaas.namespace" . }}
+      sectionName: https-auth
+  hostnames:
+    - "auth.{{ include "etalbaas.baseDomain" . }}"
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: gotrue-dev
+          port: 9999
+{{- end }}

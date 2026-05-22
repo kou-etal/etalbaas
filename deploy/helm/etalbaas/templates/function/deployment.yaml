@@ -50,7 +50,7 @@ spec:
             periodSeconds: 15
           readinessProbe:
             httpGet:
-              path: /readyz
+              path: /healthz
               port: grpc
             initialDelaySeconds: 3
             periodSeconds: 10
