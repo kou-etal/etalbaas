@@ -36,9 +36,12 @@ async function rpc<T = Record<string, unknown>>(service: string, method: string,
 // --- Input types ---
 
 interface CreateProjectInput {
-  name: string;
+  displayName: string;
   description: string;
-  region: string;
+  postgresEnabled?: boolean;
+  postgresExtensions?: string[];
+  redisEnabled?: boolean;
+  postgrestEnabled?: boolean;
 }
 
 interface ProjectIdInput {
@@ -48,107 +51,196 @@ interface ProjectIdInput {
 interface CreateApiKeyInput {
   projectId: string;
   name: string;
+  role: string;
+  expiresInDays?: number;
 }
 
 interface RevokeApiKeyInput {
   projectId: string;
-  keyId: string;
+  apiKeyId: string;
 }
 
 interface CreateFunctionInput {
   projectId: string;
   name: string;
-  runtime: string;
+  displayName?: string;
   kind: string;
   mode: string;
+  inlineSource?: { code: string; filename: string };
+  gitSource?: { repoUrl: string; branch: string; subpath: string };
+  presetRuntime?: { preset: string; requirements?: string[] };
+  customRuntime?: { dockerfile: string };
+  timeoutSec?: number;
+  gpuConfig?: { type: string; provider: string; product: string };
+  triggers?: Array<{
+    databaseChange?: { table: string; events: string[]; filter?: string };
+    objectStorage?: { bucket: string; events: string[]; prefix: string };
+  }>;
+  envVars?: Array<{ name: string; value?: string; secretName?: string }>;
 }
 
 interface FunctionIdInput {
+  projectId: string;
   functionId: string;
 }
 
 interface UpdateFunctionInput {
+  projectId: string;
   functionId: string;
   [key: string]: unknown;
 }
 
 interface ListEventHistoryInput {
   projectId: string;
+  functionId?: string;
 }
 
 interface CreateSecretInput {
   projectId: string;
-  key: string;
+  name: string;
   value: string;
+  description?: string;
 }
 
 interface DeleteSecretInput {
   projectId: string;
-  key: string;
+  secretId: string;
+}
+
+interface UpdateSecretValueInput {
+  projectId: string;
+  secretId: string;
+  value: string;
+}
+
+interface ListInvocationsInput {
+  projectId: string;
+  functionId: string;
+  statusFilter?: string;
+}
+
+interface Invocation {
+  id: string;
+  functionId: string;
+  projectId: string;
+  triggerType: string;
+  mode: string;
+  status: string;
+  errorMessage: string;
+  retryCount: number;
+  durationMs: number;
+  coldStartMs: number;
+  gpuDurationMs: number;
+  memoryPeakBytes: number;
+  cpuMillis: number;
+  gpuProvider: string;
+  gpuType: string;
+  traceId: string;
+  startedAt: string;
+  completedAt: string;
+  createdAt: string;
 }
 
 interface CreateBucketInput {
   projectId: string;
   name: string;
-  isPublic: boolean;
+  accessLevel: string;
 }
 
 // --- Response types ---
 
 interface Project {
   id: string;
-  name: string;
+  tenantId: string;
+  displayName: string;
   description: string;
-  region: string;
   status: string;
+  postgresEnabled: boolean;
+  postgresExtensions: string[];
+  redisEnabled: boolean;
+  postgrestEnabled: boolean;
   createdAt: string;
+  updatedAt: string;
+}
+
+interface EnvVar {
+  name: string;
+  value?: string;
+  secretName?: string;
 }
 
 interface FunctionItem {
   id: string;
+  projectId: string;
   name: string;
-  runtime: string;
+  displayName: string;
   kind: string;
   mode: string;
+  inlineSource?: { code: string; filename: string };
+  gitSource?: { repoUrl: string; branch: string; subpath: string };
+  presetRuntime?: { preset: string; requirements: string[] };
+  customRuntime?: { dockerfile: string };
+  timeoutSec: number;
+  gpuConfig?: { type: string; provider: string; product: string };
+  triggers?: Array<{
+    databaseChange?: { table: string; events: string[]; filter?: string; includeColumns?: string[] };
+    objectStorage?: { bucket: string; events: string[]; prefix: string };
+  }>;
+  envVars: EnvVar[];
   status: string;
-  entrypoint: string;
-  image: string;
-  lastBuildAt: string;
+  buildImageRef: string;
+  buildImageDigest: string;
+  buildDurationSec: number;
+  lastBuiltAt: string;
+  createdAt: string;
   updatedAt: string;
-  timeout: number;
-  minReplicas: number;
-  maxReplicas: number;
-  gpu: string;
-  resources: { cpu: string; memory: string };
-  envVars: Record<string, string>;
 }
 
 interface EventItem {
   id: string;
-  subject: string;
-  type: string;
+  projectId: string;
+  functionId: string;
+  invocationId: string;
+  trigger?: {
+    databaseChange?: { table: string; event: string };
+    objectStorage?: { bucket: string; objectKey: string; event: string };
+  };
+  status: string;
+  attemptCount: number;
+  lastError: string;
+  traceId: string;
   createdAt: string;
-  data?: Record<string, unknown>;
 }
 
 interface SecretItem {
-  key: string;
+  id: string;
+  projectId: string;
+  name: string;
+  description: string;
   createdAt: string;
+  updatedAt: string;
 }
 
 interface ApiKeyItem {
   id: string;
+  projectId: string;
   name: string;
-  prefix: string;
+  keyPrefix: string;
+  role: string;
+  expiresAt?: string;
+  revokedAt?: string;
   createdAt: string;
 }
 
 interface Bucket {
   id: string;
+  projectId: string;
   name: string;
-  isPublic: boolean;
-  objectCount: number;
+  accessLevel: string;
+  fileSizeLimit: number;
+  allowedMimeTypes: string[];
   createdAt: string;
+  updatedAt: string;
 }
 
 interface UserInfo {
@@ -168,13 +260,17 @@ export const projectClient = {
   getProject: (input: ProjectIdInput) =>
     rpc<{ project: Project }>("etalbaas.project.v1.ProjectService", "GetProject", input as unknown as Record<string, unknown>),
   deleteProject: (input: ProjectIdInput) =>
-    rpc<Record<string, unknown>>("etalbaas.project.v1.ProjectService", "DeleteProject", input as unknown as Record<string, unknown>),
+    rpc<{ project: Project }>("etalbaas.project.v1.ProjectService", "DeleteProject", input as unknown as Record<string, unknown>),
+  pauseProject: (input: ProjectIdInput) =>
+    rpc<{ project: Project }>("etalbaas.project.v1.ProjectService", "PauseProject", input as unknown as Record<string, unknown>),
+  resumeProject: (input: ProjectIdInput) =>
+    rpc<{ project: Project }>("etalbaas.project.v1.ProjectService", "ResumeProject", input as unknown as Record<string, unknown>),
   createApiKey: (input: CreateApiKeyInput) =>
-    rpc<{ apiKey: ApiKeyItem; key: string }>("etalbaas.project.v1.ProjectService", "CreateApiKey", input as unknown as Record<string, unknown>),
+    rpc<{ apiKey: ApiKeyItem; rawKey: string }>("etalbaas.project.v1.ProjectService", "CreateApiKey", input as unknown as Record<string, unknown>),
   listApiKeys: (input: ProjectIdInput) =>
     rpc<{ apiKeys: ApiKeyItem[] }>("etalbaas.project.v1.ProjectService", "ListApiKeys", input as unknown as Record<string, unknown>),
   revokeApiKey: (input: RevokeApiKeyInput) =>
-    rpc<Record<string, unknown>>("etalbaas.project.v1.ProjectService", "RevokeApiKey", input as unknown as Record<string, unknown>),
+    rpc<{ apiKey: ApiKeyItem }>("etalbaas.project.v1.ProjectService", "RevokeApiKey", input as unknown as Record<string, unknown>),
 };
 
 // Function Service
@@ -189,6 +285,8 @@ export const functionClient = {
     rpc<{ function: FunctionItem }>("etalbaas.function.v1.FunctionService", "UpdateFunction", input as unknown as Record<string, unknown>),
   deleteFunction: (input: FunctionIdInput) =>
     rpc<Record<string, unknown>>("etalbaas.function.v1.FunctionService", "DeleteFunction", input as unknown as Record<string, unknown>),
+  listInvocations: (input: ListInvocationsInput) =>
+    rpc<{ invocations: Invocation[] }>("etalbaas.function.v1.FunctionService", "ListInvocations", input as unknown as Record<string, unknown>),
 };
 
 // Event Service
@@ -200,11 +298,13 @@ export const eventClient = {
 // Secret Service
 export const secretClient = {
   createSecret: (input: CreateSecretInput) =>
-    rpc<Record<string, unknown>>("etalbaas.secret.v1.SecretService", "CreateSecret", input as unknown as Record<string, unknown>),
+    rpc<{ secret: SecretItem }>("etalbaas.secret.v1.SecretService", "CreateSecret", input as unknown as Record<string, unknown>),
   listSecrets: (input: ProjectIdInput) =>
     rpc<{ secrets: SecretItem[] }>("etalbaas.secret.v1.SecretService", "ListSecrets", input as unknown as Record<string, unknown>),
   deleteSecret: (input: DeleteSecretInput) =>
     rpc<Record<string, unknown>>("etalbaas.secret.v1.SecretService", "DeleteSecret", input as unknown as Record<string, unknown>),
+  updateSecretValue: (input: UpdateSecretValueInput) =>
+    rpc<{ secret: SecretItem }>("etalbaas.secret.v1.SecretService", "UpdateSecretValue", input as unknown as Record<string, unknown>),
 };
 
 // Storage Service

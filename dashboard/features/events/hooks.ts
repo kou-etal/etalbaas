@@ -6,10 +6,18 @@ import { eventClient } from "@/lib/api/clients";
 
 export interface EventItem {
   id: string;
-  subject: string;
-  type: string;
+  projectId: string;
+  functionId: string;
+  invocationId: string;
+  trigger?: {
+    databaseChange?: { table: string; event: string };
+    objectStorage?: { bucket: string; objectKey: string; event: string };
+  };
+  status: string;
+  attemptCount: number;
+  lastError: string;
+  traceId: string;
   createdAt: string;
-  data?: Record<string, unknown>;
 }
 
 export function useEvents(projectId: string) {

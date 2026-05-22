@@ -5,8 +5,11 @@ import { queryKeys } from "@/lib/api/queries";
 import { secretClient } from "@/lib/api/clients";
 
 export interface SecretItem {
-  key: string;
+  id: string;
+  name: string;
+  description: string;
   createdAt: string;
+  updatedAt: string;
 }
 
 export function useSecrets(projectId: string) {
@@ -24,10 +27,26 @@ export function useCreateSecret() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (data: { projectId: string; key: string; value: string }) => {
+    mutationFn: async (data: { projectId: string; name: string; value: string; description?: string }) => {
       await secretClient.createSecret(data);
     },
-    onSuccess: (_data: unknown, variables: { projectId: string; key: string; value: string }) => {
+    onSuccess: (_data: unknown, variables: { projectId: string; name: string; value: string; description?: string }) => {
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.secrets.list(variables.projectId),
+      });
+    },
+  });
+}
+
+export function useUpdateSecretValue() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (params: { projectId: string; secretId: string; value: string }) => {
+      await secretClient.updateSecretValue(params);
+      return params;
+    },
+    onSuccess: (_data: unknown, variables: { projectId: string; secretId: string; value: string }) => {
       queryClient.invalidateQueries({
         queryKey: queryKeys.secrets.list(variables.projectId),
       });
@@ -39,11 +58,11 @@ export function useDeleteSecret() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (params: { projectId: string; key: string }) => {
+    mutationFn: async (params: { projectId: string; secretId: string }) => {
       await secretClient.deleteSecret(params);
       return params;
     },
-    onSuccess: (_data: unknown, variables: { projectId: string; key: string }) => {
+    onSuccess: (_data: unknown, variables: { projectId: string; secretId: string }) => {
       queryClient.invalidateQueries({
         queryKey: queryKeys.secrets.list(variables.projectId),
       });

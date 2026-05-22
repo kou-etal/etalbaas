@@ -10,6 +10,11 @@ export const queryKeys = {
       [...queryKeys.functions.all, "list", projectId] as const,
     detail: (id: string) => [...queryKeys.functions.all, id] as const,
   },
+  invocations: {
+    all: ["invocations"] as const,
+    list: (projectId: string, functionId: string) =>
+      [...queryKeys.invocations.all, "list", projectId, functionId] as const,
+  },
   events: {
     all: ["events"] as const,
     list: (projectId: string) =>

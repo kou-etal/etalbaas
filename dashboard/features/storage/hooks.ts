@@ -7,9 +7,12 @@ import { storageClient } from "@/lib/api/clients";
 export interface Bucket {
   id: string;
   name: string;
-  isPublic: boolean;
-  objectCount: number;
+  accessLevel: string;
+  fileSizeLimit: number;
+  allowedMimeTypes: string[];
+  objectCount?: number;
   createdAt: string;
+  updatedAt: string;
 }
 
 export function useBuckets(projectId: string) {
@@ -27,11 +30,11 @@ export function useCreateBucket() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (data: { projectId: string; name: string; isPublic: boolean }) => {
+    mutationFn: async (data: { projectId: string; name: string; accessLevel: string }) => {
       const response = await storageClient.createBucket(data);
       return response.bucket;
     },
-    onSuccess: (_data: unknown, variables: { projectId: string; name: string; isPublic: boolean }) => {
+    onSuccess: (_data: unknown, variables: { projectId: string; name: string; accessLevel: string }) => {
       queryClient.invalidateQueries({
         queryKey: queryKeys.storage.buckets(variables.projectId),
       });

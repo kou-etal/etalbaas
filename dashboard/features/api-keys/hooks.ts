@@ -7,7 +7,10 @@ import { projectClient } from "@/lib/api/clients";
 export interface ApiKey {
   id: string;
   name: string;
-  prefix: string;
+  keyPrefix: string;
+  role: string;
+  status?: string;
+  expiresAt?: string;
   createdAt: string;
 }
 
@@ -26,8 +29,13 @@ export function useCreateApiKey() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (data: { projectId: string; name: string }) => {
-      const response = await projectClient.createApiKey(data);
+    mutationFn: async (data: { projectId: string; name: string; role?: string; expiresInDays?: number }) => {
+      const response = await projectClient.createApiKey({
+        projectId: data.projectId,
+        name: data.name,
+        role: data.role || "anon",
+        expiresInDays: data.expiresInDays,
+      });
       return response;
     },
     onSuccess: (_data, variables) => {
@@ -43,7 +51,7 @@ export function useRevokeApiKey() {
 
   return useMutation({
     mutationFn: async (params: { projectId: string; keyId: string }) => {
-      await projectClient.revokeApiKey(params);
+      await projectClient.revokeApiKey({ projectId: params.projectId, apiKeyId: params.keyId });
       return params;
     },
     onSuccess: (_data, variables) => {

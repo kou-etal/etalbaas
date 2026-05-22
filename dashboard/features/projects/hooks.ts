@@ -6,11 +6,15 @@ import { projectClient } from "@/lib/api/clients";
 
 export interface Project {
   id: string;
-  name: string;
+  displayName: string;
   description: string;
-  region: string;
   status: string;
+  postgresEnabled: boolean;
+  postgresExtensions: string[];
+  redisEnabled: boolean;
+  postgrestEnabled: boolean;
   createdAt: string;
+  updatedAt: string;
 }
 
 export function useProjects() {
@@ -38,12 +42,15 @@ export function useCreateProject() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (data: { name: string; description: string; region: string }) => {
-      const response = await projectClient.createProject({
-        name: data.name,
-        description: data.description,
-        region: data.region,
-      });
+    mutationFn: async (data: {
+      displayName: string;
+      description: string;
+      postgresEnabled?: boolean;
+      postgresExtensions?: string[];
+      redisEnabled?: boolean;
+      postgrestEnabled?: boolean;
+    }) => {
+      const response = await projectClient.createProject(data);
       return response.project;
     },
     onSuccess: () => {
@@ -58,6 +65,34 @@ export function useDeleteProject() {
   return useMutation({
     mutationFn: async (projectId: string) => {
       await projectClient.deleteProject({ projectId });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.projects.all });
+    },
+  });
+}
+
+export function usePauseProject() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (projectId: string) => {
+      const response = await projectClient.pauseProject({ projectId });
+      return response.project;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.projects.all });
+    },
+  });
+}
+
+export function useResumeProject() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (projectId: string) => {
+      const response = await projectClient.resumeProject({ projectId });
+      return response.project;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.projects.all });
