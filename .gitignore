@@ -41,6 +41,9 @@ point.txt
 # Deferred refactoring backlog
 REFACTOR_BACKLOG.md
 
+# Issue log
+ISSUE_LOG.md
+
 # Local tools
 .helm-bin/
 
