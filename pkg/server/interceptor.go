@@ -16,10 +16,10 @@ func DefaultInterceptors(logger *slog.Logger) connect.Option {
 		logger.Warn("failed to create otel interceptor", "error", err)
 	}
 	return connect.WithInterceptors(
+		otelInt, // Must be outermost so span context is available to all other interceptors.
 		middleware.NewRecoveryInterceptor(),
 		middleware.NewRequestIDInterceptor(),
 		middleware.NewLoggingInterceptor(logger),
 		auth.NewDownstreamInterceptor(),
-		otelInt,
 	)
 }
