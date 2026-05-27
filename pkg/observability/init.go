@@ -5,12 +5,19 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 
 	"go.opentelemetry.io/otel"
 
 	"github.com/kou-etal/etalbaas/pkg/observability/metrics"
 	"github.com/kou-etal/etalbaas/pkg/observability/tracing"
 )
+
+// Result holds the observability resources returned by Init.
+type Result struct {
+	Shutdown       func(context.Context) error
+	MetricsHandler http.Handler
+}
 
 type Config struct {
 	ServiceName    string
@@ -19,7 +26,7 @@ type Config struct {
 	Environment    string
 }
 
-func Init(ctx context.Context, cfg Config) (shutdown func(context.Context) error, err error) {
+func Init(ctx context.Context, cfg Config) (*Result, error) {
 	logger := NewLogger(cfg.ServiceName, cfg.Environment)
 	slog.SetDefault(logger)
 
@@ -45,7 +52,7 @@ func Init(ctx context.Context, cfg Config) (shutdown func(context.Context) error
 	}
 
 	// Metrics
-	reader, _, err := metrics.NewPrometheusExporter()
+	reader, metricsHandler, err := metrics.NewPrometheusExporter()
 	if err != nil {
 		return nil, fmt.Errorf("create metrics exporter: %w", err)
 	}
@@ -56,7 +63,7 @@ func Init(ctx context.Context, cfg Config) (shutdown func(context.Context) error
 	otel.SetMeterProvider(mp)
 	shutdownFuncs = append(shutdownFuncs, mp.Shutdown)
 
-	shutdown = func(ctx context.Context) error {
+	shutdown := func(ctx context.Context) error {
 		var errs []error
 		for _, fn := range shutdownFuncs {
 			if err := fn(ctx); err != nil {
@@ -72,5 +79,8 @@ func Init(ctx context.Context, cfg Config) (shutdown func(context.Context) error
 		slog.Bool("tracing", cfg.OTELEndpoint != ""),
 	)
 
-	return shutdown, nil
+	return &Result{
+		Shutdown:       shutdown,
+		MetricsHandler: metricsHandler,
+	}, nil
 }
