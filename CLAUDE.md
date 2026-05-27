@@ -86,6 +86,14 @@ HTML モックアップ → Next.js 移植の手順:
 - Always run tests and lint before considering a task done
 - Do not auto-commit or auto-push without explicit instruction
 
+## E2E debugging rules
+
+- **バッチ修正**: 1個ずつビルドすると時間がかかるため、修正はある程度まとめてからビルドする
+- **設計変更禁止**: 設計やフロントデザインは変更しない。不足しているフィールド・ハンドラー・state の追加は OK
+- **テスト変更の制限**: テスト自体の変更は、テスト側が明確に間違っている場合のみ（例: バリデーション上限を超える値の修正）
+- 迷ったら `docs/architecture.md` を確認する
+- **テスト結果追跡**: `dashboard/E2E_TEST_TRACKER.md` に全テストの通過/未通過状況を記録する。修正後に結果を更新すること
+
 ## Deferred refactoring
 
 - 横断的な変更が必要でその Step では対応しないリファクタリング項目は `REFACTOR_BACKLOG.md` に追記する
