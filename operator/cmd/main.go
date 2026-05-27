@@ -4,6 +4,7 @@ import (
 	"flag"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -62,6 +63,116 @@ func main() {
 	}
 
 	operatorConfig := config.DefaultConfig()
+
+	// Override defaults from environment variables (set by Helm chart).
+	if v := os.Getenv("PLATFORM_NAMESPACE"); v != "" {
+		operatorConfig.PlatformNamespace = v
+	}
+	if v := os.Getenv("BASE_DOMAIN"); v != "" {
+		operatorConfig.BaseDomain = v
+	}
+	if v := os.Getenv("REGISTRY_ENDPOINT"); v != "" {
+		operatorConfig.RegistryEndpoint = v
+	}
+	if v := os.Getenv("REGISTRY_INSECURE"); v == "true" {
+		operatorConfig.RegistryInsecure = true
+	}
+	if v := os.Getenv("NATS_ENDPOINT"); v != "" {
+		operatorConfig.NATSEndpoint = v
+	}
+	if v := os.Getenv("NATS_MONITORING_ENDPOINT"); v != "" {
+		operatorConfig.NATSMonitoringEndpoint = v
+	}
+	if v := os.Getenv("GATEWAY_NAME"); v != "" {
+		operatorConfig.GatewayName = v
+	}
+	if v := os.Getenv("GATEWAY_NAMESPACE"); v != "" {
+		operatorConfig.GatewayNamespace = v
+	}
+	if v := os.Getenv("CDC_IMAGE"); v != "" {
+		operatorConfig.CDCImage = v
+	}
+	if v := os.Getenv("NATS_SIDECAR_IMAGE"); v != "" {
+		operatorConfig.NATSSidecarImage = v
+	}
+	if v := os.Getenv("POSTGREST_IMAGE"); v != "" {
+		operatorConfig.PostgRESTImage = v
+	}
+	if v := os.Getenv("REDIS_IMAGE"); v != "" {
+		operatorConfig.RedisImage = v
+	}
+	if v := os.Getenv("KANIKO_IMAGE"); v != "" {
+		operatorConfig.KanikoImage = v
+	}
+	if v := os.Getenv("DISPATCHER_IMAGE"); v != "" {
+		operatorConfig.DispatcherImage = v
+	}
+	if v := os.Getenv("POSTGRES_META_IMAGE"); v != "" {
+		operatorConfig.PostgresMetaImage = v
+	}
+	if v := os.Getenv("GOTRUE_IMAGE"); v != "" {
+		operatorConfig.GoTrueImage = v
+	}
+	if v := os.Getenv("JWT_SECRET"); v != "" {
+		operatorConfig.JWTSecret = v
+	}
+	if v, ok := os.LookupEnv("SANDBOX_RUNTIME_CLASS"); ok {
+		operatorConfig.SandboxRuntimeClass = v
+	}
+	if v := os.Getenv("BUILD_TIMEOUT_MINUTES"); v != "" {
+		if minutes, err := strconv.Atoi(v); err == nil {
+			operatorConfig.BuildTimeout = time.Duration(minutes) * time.Minute
+		}
+	}
+	if v := os.Getenv("MAX_TOTAL_PROJECTS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			operatorConfig.MaxTotalProjects = n
+		}
+	}
+	if v := os.Getenv("MAX_CONCURRENT_BUILDS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			operatorConfig.MaxConcurrentBuilds = n
+		}
+	}
+	if v := os.Getenv("FREE_PLAN_CPU"); v != "" {
+		operatorConfig.FreePlanQuota.CPU = v
+	}
+	if v := os.Getenv("FREE_PLAN_MEMORY"); v != "" {
+		operatorConfig.FreePlanQuota.Memory = v
+	}
+	if v := os.Getenv("FREE_PLAN_PODS"); v != "" {
+		if pods, err := strconv.ParseInt(v, 10, 32); err == nil {
+			operatorConfig.FreePlanQuota.Pods = int32(pods)
+		}
+	}
+
+	// GPU configuration from Helm values (operator deployment.yaml L89-104).
+	if v := os.Getenv("GPU_ENABLED"); v == "true" {
+		operatorConfig.GPU.Enabled = true
+	}
+	if v := os.Getenv("GPU_DEFAULT_PROVIDER"); v != "" {
+		operatorConfig.GPU.DefaultProvider = v
+	}
+	if v := os.Getenv("GPU_RUNPOD_API_KEY_SECRET"); v != "" {
+		if operatorConfig.GPU.Providers.RunPod == nil {
+			operatorConfig.GPU.Providers.RunPod = &gpuprovider.RunPodConfig{}
+		}
+		operatorConfig.GPU.Providers.RunPod.Enabled = true
+		operatorConfig.GPU.Providers.RunPod.APIKeySecret = v
+	}
+	if v := os.Getenv("GPU_SELF_MANAGED_RUNTIME_CLASS"); v != "" {
+		if operatorConfig.GPU.Providers.SelfManaged == nil {
+			operatorConfig.GPU.Providers.SelfManaged = &gpuprovider.SelfManagedConfig{}
+		}
+		operatorConfig.GPU.Providers.SelfManaged.Enabled = true
+		operatorConfig.GPU.Providers.SelfManaged.RuntimeClass = v
+	}
+	if v := os.Getenv("GPU_SELF_MANAGED_RESOURCE_LIMIT"); v != "" {
+		if operatorConfig.GPU.Providers.SelfManaged == nil {
+			operatorConfig.GPU.Providers.SelfManaged = &gpuprovider.SelfManagedConfig{}
+		}
+		operatorConfig.GPU.Providers.SelfManaged.ResourceLimit = v
+	}
 
 	// Initialize NATS connection for stream/consumer management.
 	var natsAdmin *natsadmin.NATSAdmin
