@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -17,6 +19,7 @@ import (
 	"github.com/kou-etal/etalbaas/pkg/apperror"
 	storageproviders "github.com/kou-etal/etalbaas/storage-providers"
 
+	"github.com/kou-etal/etalbaas/services/storage/internal/event"
 	"github.com/kou-etal/etalbaas/services/storage/internal/pool"
 	"github.com/kou-etal/etalbaas/services/storage/internal/tenantstore"
 )
@@ -32,10 +35,11 @@ const (
 type ObjectService struct {
 	poolMgr  pool.Provider
 	provider storageproviders.ObjectStorage
+	pub      event.Publisher // nil = event publishing disabled
 }
 
-func NewObjectService(poolMgr pool.Provider, provider storageproviders.ObjectStorage) *ObjectService {
-	return &ObjectService{poolMgr: poolMgr, provider: provider}
+func NewObjectService(poolMgr pool.Provider, provider storageproviders.ObjectStorage, pub event.Publisher) *ObjectService {
+	return &ObjectService{poolMgr: poolMgr, provider: provider, pub: pub}
 }
 
 type UploadParams struct {
@@ -79,10 +83,13 @@ func (s *ObjectService) Upload(ctx context.Context, p UploadParams) (UploadResul
 		return UploadResult{}, err
 	}
 
-	key := objectKey(p.ProjectID, p.BucketName, p.ObjectPath)
+	key, err := objectKey(p.ProjectID, p.BucketName, p.ObjectPath)
+	if err != nil {
+		return UploadResult{}, err
+	}
 
 	hash := md5.New()
-	body := io.TeeReader(p.Body, hash)
+	body := io.TeeReader(io.LimitReader(p.Body, maxProxyUploadSize+1), hash)
 
 	if err := s.provider.Put(ctx, key, body, p.Size, p.ContentType); err != nil {
 		return UploadResult{}, apperror.Wrap(apperror.CodeInternal, "upload to storage provider", err)
@@ -112,6 +119,21 @@ func (s *ObjectService) Upload(ctx context.Context, p UploadParams) (UploadResul
 	if err != nil {
 		return UploadResult{}, err
 	}
+
+	if s.pub != nil {
+		if err := s.pub.PublishObjectCreated(ctx, event.StorageEvent{
+			EventID:   uuid.NewString(),
+			ProjectID: p.ProjectID,
+			Bucket:    p.BucketName,
+			ObjectKey: p.ObjectPath,
+			Size:      p.Size,
+			MimeType:  p.ContentType,
+			Timestamp: time.Now(),
+		}); err != nil {
+			slog.Warn("failed to publish object created event", "error", err, "project", p.ProjectID, "object", p.ObjectPath)
+		}
+	}
+
 	return UploadResult{Object: obj, Key: key}, nil
 }
 
@@ -142,7 +164,10 @@ func (s *ObjectService) Download(ctx context.Context, p DownloadParams) (Downloa
 		return DownloadResult{}, err
 	}
 
-	key := objectKey(p.ProjectID, p.BucketName, p.ObjectPath)
+	key, err := objectKey(p.ProjectID, p.BucketName, p.ObjectPath)
+	if err != nil {
+		return DownloadResult{}, err
+	}
 	body, info, err := s.provider.Get(ctx, key)
 	if err != nil {
 		return DownloadResult{}, apperror.Wrap(apperror.CodeNotFound, "object not found in storage", err)
@@ -179,7 +204,10 @@ func (s *ObjectService) PublicDownload(ctx context.Context, projectID, bucketNam
 		return DownloadResult{}, apperror.New(apperror.CodePermissionDenied, "bucket is not public")
 	}
 
-	key := objectKey(projectID, bucketName, objectPath)
+	key, err := objectKey(projectID, bucketName, objectPath)
+	if err != nil {
+		return DownloadResult{}, err
+	}
 	body, info, err := s.provider.Get(ctx, key)
 	if err != nil {
 		return DownloadResult{}, apperror.Wrap(apperror.CodeNotFound, "object not found in storage", err)
@@ -217,12 +245,15 @@ func (s *ObjectService) DeleteObject(ctx context.Context, p DeleteObjectParams) 
 		return err
 	}
 
-	key := objectKey(p.ProjectID, p.BucketName, p.ObjectPath)
+	key, err := objectKey(p.ProjectID, p.BucketName, p.ObjectPath)
+	if err != nil {
+		return err
+	}
 	if err := s.provider.Delete(ctx, key); err != nil {
 		return apperror.Wrap(apperror.CodeInternal, "delete from storage provider", err)
 	}
 
-	return s.poolMgr.WithRLS(ctx, p.ProjectID, p.Claims, func(tx pgx.Tx) error {
+	err = s.poolMgr.WithRLS(ctx, p.ProjectID, p.Claims, func(tx pgx.Tx) error {
 		q := tenantstore.New(tx)
 		if err := q.DeleteObject(ctx, tenantstore.DeleteObjectParams{
 			BucketID: bucket.ID,
@@ -232,6 +263,23 @@ func (s *ObjectService) DeleteObject(ctx context.Context, p DeleteObjectParams) 
 		}
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+
+	if s.pub != nil {
+		if err := s.pub.PublishObjectDeleted(ctx, event.StorageEvent{
+			EventID:   uuid.NewString(),
+			ProjectID: p.ProjectID,
+			Bucket:    p.BucketName,
+			ObjectKey: p.ObjectPath,
+			Timestamp: time.Now(),
+		}); err != nil {
+			slog.Warn("failed to publish object deleted event", "error", err, "project", p.ProjectID, "object", p.ObjectPath)
+		}
+	}
+
+	return nil
 }
 
 type ListObjectsParams struct {
@@ -250,7 +298,6 @@ func (s *ObjectService) ListObjects(ctx context.Context, p ListObjectsParams) ([
 		p.Limit = maxObjectListLimit
 	}
 
-	var bucket tenantstore.StorageBucket
 	var objects []tenantstore.StorageObject
 	err := s.poolMgr.WithRLS(ctx, p.ProjectID, p.Claims, func(tx pgx.Tx) error {
 		q := tenantstore.New(tx)
@@ -261,8 +308,6 @@ func (s *ObjectService) ListObjects(ctx context.Context, p ListObjectsParams) ([
 		if err != nil {
 			return wrapBucketNotFound(err, p.BucketName)
 		}
-		bucket = b
-		_ = bucket
 
 		objs, err := q.ListObjectsByBucket(ctx, tenantstore.ListObjectsByBucketParams{
 			BucketID: b.ID,
@@ -308,7 +353,10 @@ func (s *ObjectService) PresignUpload(ctx context.Context, p PresignUploadParams
 		return PresignResult{}, err
 	}
 
-	key := objectKey(p.ProjectID, p.BucketName, p.ObjectPath)
+	key, err := objectKey(p.ProjectID, p.BucketName, p.ObjectPath)
+	if err != nil {
+		return PresignResult{}, err
+	}
 	url, err := s.provider.PresignedPutURL(ctx, key, expiry)
 	if err != nil {
 		return PresignResult{}, apperror.Wrap(apperror.CodeInternal, "generate presigned upload URL", err)
@@ -339,7 +387,10 @@ func (s *ObjectService) PresignDownload(ctx context.Context, p PresignDownloadPa
 		return PresignResult{}, err
 	}
 
-	key := objectKey(p.ProjectID, p.BucketName, p.ObjectPath)
+	key, err := objectKey(p.ProjectID, p.BucketName, p.ObjectPath)
+	if err != nil {
+		return PresignResult{}, err
+	}
 	url, err := s.provider.PresignedGetURL(ctx, key, expiry)
 	if err != nil {
 		return PresignResult{}, apperror.Wrap(apperror.CodeInternal, "generate presigned download URL", err)
@@ -355,7 +406,10 @@ type UploadCompleteParams struct {
 }
 
 func (s *ObjectService) UploadComplete(ctx context.Context, p UploadCompleteParams) (tenantstore.StorageObject, error) {
-	key := objectKey(p.ProjectID, p.BucketName, p.ObjectPath)
+	key, err := objectKey(p.ProjectID, p.BucketName, p.ObjectPath)
+	if err != nil {
+		return tenantstore.StorageObject{}, err
+	}
 
 	info, err := s.provider.Head(ctx, key)
 	if err != nil {
@@ -393,13 +447,62 @@ func (s *ObjectService) UploadComplete(ctx context.Context, p UploadCompletePara
 	if err != nil {
 		return tenantstore.StorageObject{}, err
 	}
+
+	if s.pub != nil {
+		size := int64(0)
+		contentType := ""
+		if info.Size > 0 {
+			size = info.Size
+		}
+		if info.ContentType != "" {
+			contentType = info.ContentType
+		}
+		_ = s.pub.PublishObjectCreated(ctx, event.StorageEvent{
+			EventID:   uuid.NewString(),
+			ProjectID: p.ProjectID,
+			Bucket:    p.BucketName,
+			ObjectKey: p.ObjectPath,
+			Size:      size,
+			MimeType:  contentType,
+			Timestamp: time.Now(),
+		})
+	}
+
 	return obj, nil
 }
 
 // --- helpers ---
 
-func objectKey(projectID, bucketName, objectPath string) string {
-	return fmt.Sprintf("project-%s/%s/%s", projectID, bucketName, objectPath)
+// maxObjectPathLen is the maximum allowed length for object paths.
+const maxObjectPathLen = 1024
+
+// validateObjectPath rejects paths that could cause traversal or unexpected behavior.
+func validateObjectPath(p string) error {
+	if p == "" {
+		return apperror.New(apperror.CodeInvalidArgument, "object path must not be empty")
+	}
+	if len(p) > maxObjectPathLen {
+		return apperror.New(apperror.CodeInvalidArgument, fmt.Sprintf("object path exceeds max length %d", maxObjectPathLen))
+	}
+	if strings.HasPrefix(p, "/") {
+		return apperror.New(apperror.CodeInvalidArgument, "object path must not start with /")
+	}
+	if strings.Contains(p, "..") {
+		return apperror.New(apperror.CodeInvalidArgument, "object path must not contain '..'")
+	}
+	for _, r := range p {
+		if r < 0x20 || r == 0x7f { // control characters
+			return apperror.New(apperror.CodeInvalidArgument, "object path must not contain control characters")
+		}
+	}
+	return nil
+}
+
+func objectKey(projectID, bucketName, objectPath string) (string, error) {
+	if err := validateObjectPath(objectPath); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("project-%s/%s/%s", projectID, bucketName, objectPath), nil
 }
 
 func enforceBucketLimits(bucket tenantstore.StorageBucket, contentType string, size int64) error {

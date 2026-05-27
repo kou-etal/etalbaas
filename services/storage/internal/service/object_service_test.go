@@ -89,10 +89,36 @@ func (m *mockProvider) PresignedGetURL(ctx context.Context, key string, expiry t
 var _ storageproviders.ObjectStorage = (*mockProvider)(nil)
 
 func TestObjectKey(t *testing.T) {
-	got := objectKey("proj1", "images", "photos/cat.png")
+	got, err := objectKey("proj1", "images", "photos/cat.png")
+	if err != nil {
+		t.Fatalf("objectKey failed: %v", err)
+	}
 	want := "project-proj1/images/photos/cat.png"
 	if got != want {
 		t.Errorf("objectKey = %q, want %q", got, want)
+	}
+}
+
+func TestValidateObjectPath(t *testing.T) {
+	valid := []string{"photo.png", "dir/file.txt", "a/b/c/d.jpg"}
+	for _, p := range valid {
+		if err := validateObjectPath(p); err != nil {
+			t.Errorf("validateObjectPath(%q) = %v, want nil", p, err)
+		}
+	}
+
+	invalid := []string{
+		"",                  // empty
+		"/leading-slash",    // starts with /
+		"../traversal",      // contains ..
+		"a/../../etc/passwd", // nested traversal
+		"file\x00name",     // null byte
+		"file\x01name",     // control char
+	}
+	for _, p := range invalid {
+		if err := validateObjectPath(p); err == nil {
+			t.Errorf("validateObjectPath(%q) = nil, want error", p)
+		}
 	}
 }
 
@@ -260,7 +286,7 @@ func TestNormalizeExpiry(t *testing.T) {
 }
 
 func TestUpload_SizeExceedsLimit(t *testing.T) {
-	svc := NewObjectService(nil, &mockProvider{})
+	svc := NewObjectService(nil, &mockProvider{}, nil)
 
 	_, err := svc.Upload(context.Background(), UploadParams{
 		ProjectID:   "proj1",
