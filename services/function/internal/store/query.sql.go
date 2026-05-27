@@ -12,6 +12,18 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countActiveFunctionsByProjectID = `-- name: CountActiveFunctionsByProjectID :one
+SELECT COUNT(*) FROM functions
+WHERE project_id = $1 AND status != 'deleted'
+`
+
+func (q *Queries) CountActiveFunctionsByProjectID(ctx context.Context, projectID string) (int64, error) {
+	row := q.db.QueryRow(ctx, countActiveFunctionsByProjectID, projectID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createFunction = `-- name: CreateFunction :one
 INSERT INTO functions (
     id, project_id, name, display_name, kind, mode,
@@ -212,9 +224,9 @@ SELECT id, project_id, name, display_name, kind, mode, source_type, source_confi
 WHERE project_id = $1
   AND status != 'deleted'
   AND (
-    $2::timestamptz IS NULL
-    OR created_at < $2::timestamptz
-    OR (created_at = $2::timestamptz AND id < $3)
+    $2 IS NULL
+    OR created_at < $2
+    OR (created_at = $2 AND id < $3)
   )
 ORDER BY created_at DESC, id DESC
 LIMIT $4
@@ -222,7 +234,7 @@ LIMIT $4
 
 type ListFunctionsByProjectIDParams struct {
 	ProjectID       string
-	CursorCreatedAt pgtype.Timestamptz
+	CursorCreatedAt interface{}
 	CursorID        pgtype.UUID
 	PageSize        int32
 }
@@ -298,7 +310,7 @@ type ListInvocationsByFunctionIDParams struct {
 	StatusFilter    *string
 	Since           pgtype.Timestamptz
 	Until           pgtype.Timestamptz
-	CursorCreatedAt pgtype.Timestamptz
+	CursorCreatedAt interface{}
 	CursorID        pgtype.UUID
 	PageSize        int32
 }

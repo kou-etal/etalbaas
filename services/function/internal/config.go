@@ -7,7 +7,12 @@ import (
 
 type Config struct {
 	config.BaseConfig
-	K8sEnabled bool `env:"K8S_ENABLED" envDefault:"false"`
+	K8sEnabled          bool   `env:"K8S_ENABLED" envDefault:"false"`
+	GPUEnabled          bool   `env:"GPU_ENABLED" envDefault:"false"`
+	PlatformNamespace   string `env:"PLATFORM_NAMESPACE" envDefault:"platform-system"`
+	DispatcherImage     string `env:"DISPATCHER_IMAGE" envDefault:"etalbaas/gpu-dispatcher:latest"`
+	SandboxRuntimeClass string `env:"SANDBOX_RUNTIME_CLASS" envDefault:""`
+	GPUAPIKeySecret     string `env:"GPU_API_KEY_SECRET" envDefault:"runpod-creds"`
 }
 
 func NewConfig() (*Config, error) {

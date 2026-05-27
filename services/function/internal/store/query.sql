@@ -66,6 +66,10 @@ SET status = $3,
 WHERE id = $1 AND project_id = $2 AND status != 'deleted'
 RETURNING *;
 
+-- name: CountActiveFunctionsByProjectID :one
+SELECT COUNT(*) FROM functions
+WHERE project_id = $1 AND status != 'deleted';
+
 -- name: ListInvocationsByFunctionID :many
 SELECT * FROM invocations
 WHERE function_id = sqlc.arg('function_id')

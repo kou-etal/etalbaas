@@ -27,7 +27,8 @@ const (
 	maxTimeoutHeavyCPU = 3600
 	defaultTimeoutSec  = 30
 
-	maxInlineSourceBytes = 1024 * 1024 // 1MB, matches ConfigMap limit
+	maxInlineSourceBytes      = 1024 * 1024 // 1MB, matches ConfigMap limit
+	maxFunctionsPerProject    = 10         // Free plan limit
 )
 
 var functionNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*[a-z0-9]$`)
@@ -125,6 +126,7 @@ type CreateFunctionParams struct {
 }
 
 func (s *FunctionService) CreateFunction(ctx context.Context, p CreateFunctionParams) (store.Function, error) {
+	// Validate inputs first (no DB access needed)
 	if err := validateFunctionName(p.Name); err != nil {
 		return store.Function{}, err
 	}
@@ -154,6 +156,15 @@ func (s *FunctionService) CreateFunction(ctx context.Context, p CreateFunctionPa
 
 	if err := s.verifyProjectOwnership(ctx, p.ProjectID, p.TenantID); err != nil {
 		return store.Function{}, err
+	}
+
+	// Enforce per-project function count limit
+	fnCount, err := s.q.CountActiveFunctionsByProjectID(ctx, p.ProjectID)
+	if err != nil {
+		return store.Function{}, wrapDBError(err, "count functions")
+	}
+	if fnCount >= maxFunctionsPerProject {
+		return store.Function{}, apperror.New(apperror.CodeResourceExhausted, "function limit reached for current plan")
 	}
 
 	row, err := s.q.CreateFunction(ctx, store.CreateFunctionParams{
@@ -242,6 +253,14 @@ func (s *FunctionService) ListFunctions(ctx context.Context, tenantID uuid.UUID,
 	if err != nil {
 		return nil, wrapDBError(err, "list functions")
 	}
+
+	// Lazy-sync: update metaDB from K8s CRD for any in-progress functions.
+	for i, row := range rows {
+		if row.Status == "pending" || row.Status == "building" {
+			rows[i] = s.syncBuildStatus(ctx, row)
+		}
+	}
+
 	return rows, nil
 }
 

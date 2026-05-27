@@ -24,6 +24,7 @@ import (
 var testUserID = uuid.MustParse("550e8400-e29b-41d4-a716-446655440000")
 
 type mockQuerier struct {
+	countActiveFunctionsByProjectIDFn func(ctx context.Context, projectID string) (int64, error)
 	createFunctionFn              func(ctx context.Context, arg store.CreateFunctionParams) (store.Function, error)
 	getFunctionByIDAndProjectIDFn func(ctx context.Context, arg store.GetFunctionByIDAndProjectIDParams) (store.Function, error)
 	getProjectByIDAndTenantIDFn   func(ctx context.Context, arg store.GetProjectByIDAndTenantIDParams) (store.Project, error)
@@ -32,6 +33,13 @@ type mockQuerier struct {
 	deleteFunctionFn              func(ctx context.Context, arg store.DeleteFunctionParams) (store.Function, error)
 	listInvocationsByFunctionIDFn    func(ctx context.Context, arg store.ListInvocationsByFunctionIDParams) ([]store.Invocation, error)
 	updateFunctionBuildStatusFn      func(ctx context.Context, arg store.UpdateFunctionBuildStatusParams) (store.Function, error)
+}
+
+func (m *mockQuerier) CountActiveFunctionsByProjectID(ctx context.Context, projectID string) (int64, error) {
+	if m.countActiveFunctionsByProjectIDFn != nil {
+		return m.countActiveFunctionsByProjectIDFn(ctx, projectID)
+	}
+	return 0, nil
 }
 
 func (m *mockQuerier) CreateFunction(ctx context.Context, arg store.CreateFunctionParams) (store.Function, error) {

@@ -206,6 +206,7 @@ func TestCreateFunction_ValidationErrors(t *testing.T) {
 // =========================================================================
 
 type mockQuerier struct {
+	countActiveFunctionsByProjectIDFn func(ctx context.Context, projectID string) (int64, error)
 	getFunctionByIDAndProjectIDFn    func(ctx context.Context, arg store.GetFunctionByIDAndProjectIDParams) (store.Function, error)
 	getProjectByIDAndTenantIDFn      func(ctx context.Context, arg store.GetProjectByIDAndTenantIDParams) (store.Project, error)
 	updateFunctionFn                 func(ctx context.Context, arg store.UpdateFunctionParams) (store.Function, error)
@@ -216,6 +217,13 @@ type mockQuerier struct {
 	deleteFunctionFn              func(ctx context.Context, arg store.DeleteFunctionParams) (store.Function, error)
 	listFunctionsByProjectIDFn    func(ctx context.Context, arg store.ListFunctionsByProjectIDParams) ([]store.Function, error)
 	listInvocationsByFunctionIDFn func(ctx context.Context, arg store.ListInvocationsByFunctionIDParams) ([]store.Invocation, error)
+}
+
+func (m *mockQuerier) CountActiveFunctionsByProjectID(ctx context.Context, projectID string) (int64, error) {
+	if m.countActiveFunctionsByProjectIDFn != nil {
+		return m.countActiveFunctionsByProjectIDFn(ctx, projectID)
+	}
+	return 0, nil
 }
 
 func (m *mockQuerier) CreateFunction(ctx context.Context, arg store.CreateFunctionParams) (store.Function, error) {

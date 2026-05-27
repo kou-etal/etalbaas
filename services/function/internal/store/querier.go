@@ -9,6 +9,7 @@ import (
 )
 
 type Querier interface {
+	CountActiveFunctionsByProjectID(ctx context.Context, projectID string) (int64, error)
 	CreateFunction(ctx context.Context, arg CreateFunctionParams) (Function, error)
 	DeleteFunction(ctx context.Context, arg DeleteFunctionParams) (Function, error)
 	GetFunctionByIDAndProjectID(ctx context.Context, arg GetFunctionByIDAndProjectIDParams) (Function, error)
