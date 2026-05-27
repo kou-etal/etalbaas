@@ -61,6 +61,8 @@ func (m *Manager) GetPool(ctx context.Context, projectID string) (*pgxpool.Pool,
 	m.mu.Unlock()
 
 	// singleflight ensures only one pool creation per projectID.
+	// Use context.WithoutCancel so that one caller's cancellation doesn't
+	// fail pool creation for all concurrent callers sharing the same flight.
 	v, err, _ := m.sf.Do(projectID, func() (interface{}, error) {
 		// Double-check after acquiring singleflight.
 		m.mu.Lock()
@@ -71,7 +73,9 @@ func (m *Manager) GetPool(ctx context.Context, projectID string) (*pgxpool.Pool,
 		}
 		m.mu.Unlock()
 
-		pool, err := m.createPool(ctx, projectID)
+		sfCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+		defer cancel()
+		pool, err := m.createPool(sfCtx, projectID)
 		if err != nil {
 			return nil, err
 		}
@@ -147,7 +151,11 @@ func (m *Manager) createPool(ctx context.Context, projectID string) (*pgxpool.Po
 	namespace := "project-" + projectID
 	secretName := "db-app"
 
-	secret, err := m.k8sClient.CoreV1().Secrets(namespace).Get(ctx, secretName, metav1.GetOptions{})
+	// Bound K8s API calls to avoid hanging on apiserver issues.
+	k8sCtx, k8sCancel := context.WithTimeout(ctx, 10*time.Second)
+	defer k8sCancel()
+
+	secret, err := m.k8sClient.CoreV1().Secrets(namespace).Get(k8sCtx, secretName, metav1.GetOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("get tenant db secret %s/%s: %w", namespace, secretName, err)
 	}
@@ -158,7 +166,12 @@ func (m *Manager) createPool(ctx context.Context, projectID string) (*pgxpool.Po
 		return nil, fmt.Errorf("tenant db secret %s/%s: missing username or password", namespace, secretName)
 	}
 
+	// Prefer pooler (PgBouncer) if available, fall back to direct connection.
 	host := fmt.Sprintf("db-pooler-rw.%s.svc", namespace)
+	_, svcErr := m.k8sClient.CoreV1().Services(namespace).Get(k8sCtx, "db-pooler-rw", metav1.GetOptions{})
+	if svcErr != nil {
+		host = fmt.Sprintf("db-rw.%s.svc", namespace)
+	}
 	dsn := fmt.Sprintf("postgres://%s:%s@%s:5432/postgres", username, password, host)
 
 	cfg, err := pgxpool.ParseConfig(dsn)
