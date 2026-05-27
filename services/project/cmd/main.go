@@ -26,7 +26,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	shutdown, err := observability.Init(ctx, observability.Config{
+	obs, err := observability.Init(ctx, observability.Config{
 		ServiceName:    "project",
 		ServiceVersion: "0.1.0",
 		OTELEndpoint:   cfg.OTELEndpoint,
@@ -36,7 +36,7 @@ func main() {
 		log.Fatal(err)
 	}
 	defer func() {
-		if err := shutdown(ctx); err != nil {
+		if err := obs.Shutdown(ctx); err != nil {
 			slog.Error("observability shutdown failed", "error", err)
 		}
 	}()
@@ -87,6 +87,7 @@ func main() {
 		server.Handler{Pattern: projPath, Handler: projHnd},
 		server.Handler{Pattern: secPath, Handler: secHnd},
 	)
+	srv.SetMetricsHandler(obs.MetricsHandler)
 	srv.RegisterHealthChecker(func(ctx context.Context) error {
 		return metadb.HealthCheck(ctx, pool)
 	})
