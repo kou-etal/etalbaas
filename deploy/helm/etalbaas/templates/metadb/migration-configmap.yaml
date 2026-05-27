@@ -1,0 +1,19 @@
+{{- if and (eq .Values.metadb.mode "internal") .Values.metadb.migration.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: meta-db-migrations
+  namespace: {{ include "etalbaas.namespace" . }}
+  labels:
+    {{- include "etalbaas.labels" . | nindent 4 }}
+    app.kubernetes.io/component: meta-db-migration
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "5"
+    helm.sh/hook-delete-policy: before-hook-creation
+data:
+  {{- range $path, $bytes := .Files.Glob "migrations/**.up.sql" }}
+  {{ base $path }}: |
+    {{- $.Files.Get $path | nindent 4 }}
+  {{- end }}
+{{- end }}
