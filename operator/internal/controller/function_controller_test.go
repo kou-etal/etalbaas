@@ -80,7 +80,7 @@ func newTestParentProject(projectID string) *etalbaasv1alpha1.Project {
 	return &etalbaasv1alpha1.Project{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      projectID,
-			Namespace: "project-" + projectID,
+			Namespace: config.DefaultConfig().PlatformNamespace,
 			Labels: map[string]string{
 				"etalbaas.io/user-id":    "user123",
 				"etalbaas.io/project-id": projectID,
@@ -167,7 +167,10 @@ func TestGenerateDockerfile_Unsupported(t *testing.T) {
 func TestKanikoBuildJob(t *testing.T) {
 	fn := newTestFunction("image-gen", "abc123", etalbaasv1alpha1.FunctionKindHeavyDeployment)
 	cfg := config.DefaultConfig()
-	job := build.KanikoBuildJob(fn, cfg)
+	job, err := build.KanikoBuildJob(fn, cfg)
+	if err != nil {
+		t.Fatalf("KanikoBuildJob failed: %v", err)
+	}
 
 	if job.Namespace != cfg.PlatformNamespace {
 		t.Errorf("Expected namespace %s, got %s", cfg.PlatformNamespace, job.Namespace)

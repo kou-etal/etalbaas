@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -48,6 +49,8 @@ type FunctionReconciler struct {
 // +kubebuilder:rbac:groups="",resources=services;configmaps,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=autoscaling,resources=horizontalpodautoscalers,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=httproutes,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=referencegrants,verbs=get;list;watch;create;update;patch
+// +kubebuilder:rbac:groups=gateway.envoyproxy.io,resources=backendtrafficpolicies,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=keda.sh,resources=scaledobjects,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=http.keda.sh,resources=httpscaledobjects,verbs=get;list;watch;create;update;patch;delete
 
@@ -85,11 +88,11 @@ func (r *FunctionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return r.setFunctionFailed(ctx, &fn, "NamespaceMismatch", err)
 	}
 
-	// 4. Verify parent Project exists
+	// 4. Verify parent Project exists (Project CRs live in the platform namespace)
 	var project etalbaasv1alpha1.Project
 	if err := r.Get(ctx, types.NamespacedName{
 		Name:      fn.Spec.ProjectRef.Name,
-		Namespace: fn.Namespace,
+		Namespace: r.Config.PlatformNamespace,
 	}, &project); err != nil {
 		if apierrors.IsNotFound(err) {
 			logger.Info("parent Project not found, requeueing")
@@ -107,7 +110,8 @@ func (r *FunctionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	// 5. Build phase: determine if a build is needed
 	needsBuild := fn.Status.ObservedGeneration < fn.Generation
 
-	if needsBuild || (fn.Status.Phase == etalbaasv1alpha1.FunctionPhaseBuilding) {
+	buildSucceeded := fn.Status.Build != nil && fn.Status.Build.Status == etalbaasv1alpha1.BuildStatusSucceeded
+	if needsBuild || (fn.Status.Phase == etalbaasv1alpha1.FunctionPhaseBuilding && !buildSucceeded) {
 		return r.reconcileBuild(ctx, &fn)
 	}
 
@@ -125,10 +129,19 @@ func (r *FunctionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return r.setFunctionFailed(ctx, &fn, "WorkloadFailed", err)
 	}
 
-	// External GPU functions don't need in-cluster networking or autoscaling.
-	// The workload runs on the external provider; only build + status update needed.
+	// External GPU functions route invocations through Function MS → Dispatcher Job.
+	// No in-cluster Deployment/Service/autoscaling, but need HTTPRoute → Function MS.
 	if resources.IsExternalGPU(&fn) {
-		logger.Info("external GPU function, skipping Service/HTTPRoute/autoscaling")
+		logger.Info("external GPU function, creating GPU invoker route via Function MS")
+		if err := r.reconcileGPUHTTPRoute(ctx, &fn); err != nil {
+			return r.setFunctionFailed(ctx, &fn, "GPUHTTPRouteFailed", err)
+		}
+		if err := r.reconcileGPUReferenceGrant(ctx, &fn); err != nil {
+			return r.setFunctionFailed(ctx, &fn, "GPUReferenceGrantFailed", err)
+		}
+		if err := r.reconcileGPUBackendTrafficPolicy(ctx, &fn); err != nil {
+			return r.setFunctionFailed(ctx, &fn, "GPUBackendTrafficPolicyFailed", err)
+		}
 		return r.updateFunctionStatus(ctx, &fn)
 	}
 
@@ -138,7 +151,7 @@ func (r *FunctionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return r.setFunctionFailed(ctx, &fn, "ServiceFailed", err)
 	}
 
-	// 8. Reconcile NATS consumer (for DatabaseChange triggers)
+	// 8. Reconcile NATS consumer (for event-driven triggers: DatabaseChange + ObjectStorage)
 	if err := r.reconcileNATSConsumer(ctx, &fn); err != nil {
 		logger.Error(err, "failed to reconcile NATS consumer")
 		return r.setFunctionFailed(ctx, &fn, "NATSConsumerFailed", err)
@@ -146,12 +159,20 @@ func (r *FunctionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 	// 9. Reconcile autoscaling (HPA, KEDA ScaledObject, or HTTPScaledObject)
 	if err := r.reconcileAutoscaling(ctx, &fn); err != nil {
+		if apierrors.IsConflict(err) {
+			logger.Info("autoscaling conflict, requeueing", "error", err.Error())
+			return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
+		}
 		logger.Error(err, "failed to reconcile autoscaling")
 		return r.setFunctionFailed(ctx, &fn, "AutoscaleFailed", err)
 	}
 
 	// 10. Reconcile HTTPRoute
 	if err := r.reconcileFunctionHTTPRoute(ctx, &fn); err != nil {
+		if apierrors.IsConflict(err) {
+			logger.Info("HTTPRoute conflict, requeueing", "error", err.Error())
+			return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
+		}
 		logger.Error(err, "failed to reconcile function HTTPRoute")
 		return r.setFunctionFailed(ctx, &fn, "HTTPRouteFailed", err)
 	}
@@ -316,9 +337,9 @@ func (r *FunctionReconciler) reconcileBuild(ctx context.Context, fn *etalbaasv1a
 	for i := range jobList.Items {
 		job := &jobList.Items[i]
 		if job.Status.Succeeded > 0 {
-			// Build succeeded
+			// Build succeeded — update build status but leave phase as Building.
+			// Phase transitions to Ready after workload deployment is verified.
 			logger.Info("build succeeded", "job", job.Name)
-			fn.Status.Phase = etalbaasv1alpha1.FunctionPhaseReady
 			fn.Status.Build = &etalbaasv1alpha1.BuildStatus{
 				Status:   etalbaasv1alpha1.BuildStatusSucceeded,
 				ImageRef: expectedImage,
@@ -360,11 +381,43 @@ func (r *FunctionReconciler) reconcileBuild(ctx context.Context, fn *etalbaasv1a
 		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 	}
 
+	// Enforce concurrent build limit per project before creating a new job
+	if r.Config.MaxConcurrentBuilds > 0 {
+		allBuildJobs := &batchv1.JobList{}
+		if err := r.List(ctx, allBuildJobs, client.InNamespace(r.Config.PlatformNamespace),
+			client.MatchingLabels{
+				"etalbaas.io/project-id": projectID,
+				"etalbaas.io/build":      "true",
+			},
+		); err != nil {
+			return ctrl.Result{}, fmt.Errorf("list build jobs for concurrency check: %w", err)
+		}
+		runningCount := 0
+		for i := range allBuildJobs.Items {
+			j := &allBuildJobs.Items[i]
+			if j.Status.Succeeded == 0 && !isJobFailed(j) {
+				runningCount++
+			}
+		}
+		if runningCount >= r.Config.MaxConcurrentBuilds {
+			logger.Info("concurrent build limit reached, requeueing",
+				"running", runningCount, "limit", r.Config.MaxConcurrentBuilds)
+			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		}
+	}
+
 	// No active job - create new build job
 	logger.Info("creating build job", "function", funcName)
-	buildJob := build.KanikoBuildJob(fn, r.Config)
+	buildJob, err := build.KanikoBuildJob(fn, r.Config)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("build job spec: %w", err)
+	}
 
 	if err := r.Create(ctx, buildJob); err != nil {
+		if apierrors.IsAlreadyExists(err) {
+			logger.Info("build job already exists, requeueing", "job", buildJob.Name)
+			return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
+		}
 		return ctrl.Result{}, fmt.Errorf("create build job: %w", err)
 	}
 
@@ -441,12 +494,13 @@ func (r *FunctionReconciler) reconcileFunctionService(ctx context.Context, fn *e
 	return r.Update(ctx, existing)
 }
 
-// reconcileNATSConsumer ensures the NATS JetStream consumer exists for DatabaseChange triggers.
+// reconcileNATSConsumer ensures the NATS JetStream consumer exists for event-driven triggers
+// (DatabaseChange and/or ObjectStorage).
 func (r *FunctionReconciler) reconcileNATSConsumer(ctx context.Context, fn *etalbaasv1alpha1.Function) error {
 	if r.NATSAdmin == nil {
-		if resources.HasDatabaseChangeTrigger(fn) {
+		if resources.HasEventTrigger(fn) {
 			logger := ctrl.LoggerFrom(ctx)
-			logger.Info("WARNING: NATS admin not configured, skipping consumer reconciliation for DatabaseChange trigger",
+			logger.Info("WARNING: NATS admin not configured, skipping consumer reconciliation for event trigger",
 				"function", fn.Name)
 		}
 		return nil
@@ -456,29 +510,55 @@ func (r *FunctionReconciler) reconcileNATSConsumer(ctx context.Context, fn *etal
 	consumerName := natsadmin.ConsumerName(fn.Name)
 	streamName := natsadmin.StreamName(projectID)
 
-	if !resources.HasDatabaseChangeTrigger(fn) {
-		// No DatabaseChange triggers — delete consumer if it exists.
+	if !resources.HasEventTrigger(fn) {
+		// No event triggers — delete consumer if it exists.
 		return r.NATSAdmin.DeleteConsumer(streamName, consumerName)
 	}
 
-	// Build filter subjects from triggers.
-	var triggers []natsadmin.TriggerInfo
+	// Build filter subjects from all event-driven triggers.
+	var filterSubjects []string
+
+	// DatabaseChange triggers
+	var dbTriggers []natsadmin.TriggerInfo
 	for _, t := range fn.Spec.Triggers {
 		if t.Type == "DatabaseChange" && t.DatabaseChange != nil {
-			triggers = append(triggers, natsadmin.TriggerInfo{
+			dbTriggers = append(dbTriggers, natsadmin.TriggerInfo{
 				Table:      t.DatabaseChange.Table,
 				Operations: t.DatabaseChange.Operations,
 			})
 		}
 	}
+	filterSubjects = append(filterSubjects, natsadmin.BuildFilterSubjects("events.database", projectID, dbTriggers)...)
 
-	filterSubjects := natsadmin.BuildFilterSubjects("events.database", projectID, triggers)
+	// ObjectStorage triggers
+	for _, t := range fn.Spec.Triggers {
+		if t.Type == "ObjectStorage" && t.ObjectStorage != nil {
+			for _, ev := range t.ObjectStorage.Events {
+				op := storageEventToOp(ev)
+				filterSubjects = append(filterSubjects, fmt.Sprintf(
+					"events.storage.%s.project-%s.%s",
+					op, projectID, t.ObjectStorage.Bucket,
+				))
+			}
+		}
+	}
 
 	return r.NATSAdmin.EnsureConsumer(natsadmin.ConsumerConfig{
 		StreamName:     streamName,
 		ConsumerName:   consumerName,
 		FilterSubjects: filterSubjects,
 	})
+}
+
+// storageEventToOp converts an ObjectStorage event name to a NATS subject operation token.
+// e.g. "ObjectCreated" → "created", "ObjectDeleted" → "deleted"
+func storageEventToOp(event string) string {
+	lower := strings.ToLower(event)
+	lower = strings.TrimPrefix(lower, "object")
+	if lower == "" {
+		return "unknown"
+	}
+	return lower
 }
 
 // reconcileAutoscaling creates or updates HPA, KEDA ScaledObject, or HTTPScaledObject.
@@ -603,7 +683,10 @@ func (r *FunctionReconciler) reconcileUnstructuredFunction(ctx context.Context, 
 	existing.SetNamespace(desired.GetNamespace())
 
 	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, existing, func() error {
-		spec, found, _ := unstructured.NestedMap(desired.Object, "spec")
+		spec, found, nestedErr := unstructured.NestedMap(desired.Object, "spec")
+		if nestedErr != nil {
+			return fmt.Errorf("read spec from desired: %w", nestedErr)
+		}
 		if found {
 			if err := unstructured.SetNestedMap(existing.Object, spec, "spec"); err != nil {
 				return err
@@ -643,12 +726,16 @@ func (r *FunctionReconciler) updateFunctionStatus(ctx context.Context, fn *etalb
 	fn.Status.ObservedGeneration = fn.Generation
 
 	// Set execution status
+	rc := r.Config.SandboxRuntimeClass
+	if rc == "" {
+		rc = "none"
+	}
 	fn.Status.Execution = &etalbaasv1alpha1.ExecutionStatus{
-		RuntimeClass: "gvisor",
+		RuntimeClass: rc,
 	}
 
 	if isExtGPU {
-		fn.Status.Execution.RuntimeClass = "gvisor" // Dispatcher is CPU only
+		fn.Status.Execution.RuntimeClass = rc // Dispatcher is CPU only
 		fn.Status.Execution.GpuProvider = fn.Spec.GPU.Provider
 		fn.Status.Execution.Mode = "ExternalGPU"
 	} else if isGPUSelfManaged(fn) {
@@ -756,10 +843,34 @@ func (r *FunctionReconciler) validateGPUConfig(fn *etalbaasv1alpha1.Function) er
 	return nil
 }
 
+// reconcileGPUHTTPRoute creates or updates the HTTPRoute that routes GPU function
+// invocations to Function MS (cross-namespace via ReferenceGrant).
+func (r *FunctionReconciler) reconcileGPUHTTPRoute(ctx context.Context, fn *etalbaasv1alpha1.Function) error {
+	route := resources.DesiredGPUFunctionHTTPRoute(fn, r.Config)
+	return r.reconcileUnstructuredFunction(ctx, route)
+}
+
+// reconcileGPUReferenceGrant ensures a ReferenceGrant exists in the platform namespace
+// allowing this project's HTTPRoute to reference the Function MS Service.
+func (r *FunctionReconciler) reconcileGPUReferenceGrant(ctx context.Context, fn *etalbaasv1alpha1.Function) error {
+	grant := resources.DesiredGPUReferenceGrant(fn.Namespace, r.Config)
+	return r.reconcileUnstructuredFunction(ctx, grant)
+}
+
+// reconcileGPUBackendTrafficPolicy creates or updates the BackendTrafficPolicy
+// that extends Envoy Gateway timeout to 300s for GPU function HTTPRoutes.
+func (r *FunctionReconciler) reconcileGPUBackendTrafficPolicy(ctx context.Context, fn *etalbaasv1alpha1.Function) error {
+	btp := resources.DesiredGPUBackendTrafficPolicy(fn)
+	return r.reconcileUnstructuredFunction(ctx, btp)
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *FunctionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&etalbaasv1alpha1.Function{}).
+		Owns(&appsv1.Deployment{}).
+		Owns(&corev1.Service{}).
+		Owns(&autoscalingv2.HorizontalPodAutoscaler{}).
 		Named("function").
 		Complete(r)
 }
