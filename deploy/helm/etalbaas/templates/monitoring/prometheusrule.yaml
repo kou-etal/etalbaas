@@ -1,0 +1,180 @@
+{{- if .Values.observability.alerting.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: etalbaas-platform
+  namespace: {{ include "etalbaas.namespace" . }}
+  labels:
+    {{- include "etalbaas.labels" . | nindent 4 }}
+spec:
+  groups:
+    - name: etalbaas.service
+      rules:
+        - alert: ServiceDown
+          expr: up{namespace="{{ include "etalbaas.namespace" . }}"} == 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Service {{ "{{" }} $labels.job {{ "}}" }} is down"
+            description: "{{ "{{" }} $labels.job {{ "}}" }} has been unreachable for 5 minutes."
+
+        - alert: PodRestarting
+          expr: increase(kube_pod_container_status_restarts_total{namespace="{{ include "etalbaas.namespace" . }}"}[15m]) > 3
+          for: 0m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Pod {{ "{{" }} $labels.pod {{ "}}" }} is restarting frequently"
+            description: "{{ "{{" }} $labels.pod {{ "}}" }} has restarted {{ "{{" }} $value {{ "}}" }} times in the last 15 minutes."
+
+        - alert: HighErrorRate
+          expr: >-
+            100 * sum(rate(rpc_server_duration_milliseconds_count{namespace="{{ include "etalbaas.namespace" . }}", rpc_grpc_status_code!="0"}[5m])) by (service_name)
+            / sum(rate(rpc_server_duration_milliseconds_count{namespace="{{ include "etalbaas.namespace" . }}"}[5m])) by (service_name)
+            > 5
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "High error rate on {{ "{{" }} $labels.service_name {{ "}}" }}"
+            description: "{{ "{{" }} $labels.service_name {{ "}}" }} error rate is {{ "{{" }} $value | printf \"%.1f\" {{ "}}" }}% (threshold: 5%)."
+
+        - alert: HighLatency
+          expr: >-
+            histogram_quantile(0.95,
+              sum(rate(rpc_server_duration_milliseconds_bucket{namespace="{{ include "etalbaas.namespace" . }}"}[5m])) by (le, service_name)
+            ) > 500
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "High p95 latency on {{ "{{" }} $labels.service_name {{ "}}" }}"
+            description: "{{ "{{" }} $labels.service_name {{ "}}" }} p95 latency is {{ "{{" }} $value | printf \"%.0f\" {{ "}}" }}ms (threshold: 500ms)."
+
+    - name: etalbaas.operator
+      rules:
+        - alert: OperatorReconcileErrors
+          expr: >-
+            increase(controller_runtime_reconcile_total{namespace="{{ include "etalbaas.namespace" . }}", result="error"}[15m]) > 5
+          for: 0m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Operator reconcile errors on {{ "{{" }} $labels.controller {{ "}}" }}"
+            description: "{{ "{{" }} $labels.controller {{ "}}" }} controller has {{ "{{" }} $value {{ "}}" }} reconcile errors in the last 15 minutes."
+
+    - name: etalbaas.pod-health
+      rules:
+        - alert: PodCrashLoopBackOff
+          expr: kube_pod_container_status_waiting_reason{reason="CrashLoopBackOff"} > 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Pod {{ "{{" }} $labels.pod {{ "}}" }} is in CrashLoopBackOff"
+            description: "{{ "{{" }} $labels.namespace {{ "}}" }}/{{ "{{" }} $labels.pod {{ "}}" }} has been in CrashLoopBackOff for 5 minutes."
+
+        - alert: PodOOMKilled
+          expr: kube_pod_container_status_last_terminated_reason{reason="OOMKilled"} > 0
+          for: 0m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Pod {{ "{{" }} $labels.pod {{ "}}" }} was OOMKilled"
+            description: "{{ "{{" }} $labels.namespace {{ "}}" }}/{{ "{{" }} $labels.pod {{ "}}" }} container {{ "{{" }} $labels.container {{ "}}" }} was terminated due to OOM."
+
+        - alert: PodStuckPending
+          expr: kube_pod_status_phase{phase="Pending"} > 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Pod {{ "{{" }} $labels.pod {{ "}}" }} stuck in Pending"
+            description: "{{ "{{" }} $labels.namespace {{ "}}" }}/{{ "{{" }} $labels.pod {{ "}}" }} has been Pending for 15 minutes. Check resource availability."
+
+        - alert: PodNotReady
+          expr: kube_pod_status_ready{condition="true"} == 0 and kube_pod_status_phase{phase="Running"} == 1
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Pod {{ "{{" }} $labels.pod {{ "}}" }} is running but not ready"
+            description: "{{ "{{" }} $labels.namespace {{ "}}" }}/{{ "{{" }} $labels.pod {{ "}}" }} has been running but not ready for 10 minutes."
+
+        - alert: ContainerHighMemoryUsage
+          expr: >-
+            container_memory_working_set_bytes{namespace=~"project-.*|{{ include "etalbaas.namespace" . }}"}
+            / on(namespace, pod, container) kube_pod_container_resource_limits{resource="memory"}
+            > 0.9
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Container {{ "{{" }} $labels.container {{ "}}" }} nearing memory limit"
+            description: "{{ "{{" }} $labels.namespace {{ "}}" }}/{{ "{{" }} $labels.pod {{ "}}" }}/{{ "{{" }} $labels.container {{ "}}" }} is using {{ "{{" }} $value | humanizePercentage {{ "}}" }} of its memory limit."
+
+    - name: etalbaas.infrastructure
+      rules:
+        - alert: NodeNotReady
+          expr: kube_node_status_condition{condition="Ready", status="true"} == 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Node {{ "{{" }} $labels.node {{ "}}" }} is not ready"
+            description: "{{ "{{" }} $labels.node {{ "}}" }} has been NotReady for 5 minutes."
+
+        - alert: NodeMemoryPressure
+          expr: kube_node_status_condition{condition="MemoryPressure", status="true"} == 1
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Node {{ "{{" }} $labels.node {{ "}}" }} has memory pressure"
+            description: "{{ "{{" }} $labels.node {{ "}}" }} is under memory pressure."
+
+        - alert: NodeDiskPressure
+          expr: kube_node_status_condition{condition="DiskPressure", status="true"} == 1
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Node {{ "{{" }} $labels.node {{ "}}" }} has disk pressure"
+            description: "{{ "{{" }} $labels.node {{ "}}" }} is under disk pressure."
+
+        - alert: PVCNearFull
+          expr: >-
+            kubelet_volume_stats_used_bytes / kubelet_volume_stats_capacity_bytes > 0.85
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "PVC {{ "{{" }} $labels.persistentvolumeclaim {{ "}}" }} is nearly full"
+            description: "{{ "{{" }} $labels.namespace {{ "}}" }}/{{ "{{" }} $labels.persistentvolumeclaim {{ "}}" }} is {{ "{{" }} $value | humanizePercentage {{ "}}" }} full."
+
+    - name: etalbaas.builds
+      rules:
+        - alert: BuildJobFailed
+          expr: >-
+            increase(kube_job_status_failed{namespace="{{ include "etalbaas.namespace" . }}"}[30m]) > 0
+            and on(job_name) kube_job_labels{label_etalbaas_io_build="true"}
+          for: 0m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Build job {{ "{{" }} $labels.job_name {{ "}}" }} failed"
+            description: "Kaniko build job {{ "{{" }} $labels.job_name {{ "}}" }} has failed."
+
+        - alert: BuildJobStuck
+          expr: >-
+            time() - kube_job_status_start_time{namespace="{{ include "etalbaas.namespace" . }}"} > 1200
+            and on(job_name) kube_job_labels{label_etalbaas_io_build="true"}
+            and kube_job_status_active{namespace="{{ include "etalbaas.namespace" . }}"} > 0
+          for: 0m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Build job {{ "{{" }} $labels.job_name {{ "}}" }} is stuck"
+            description: "Kaniko build job {{ "{{" }} $labels.job_name {{ "}}" }} has been running for over 20 minutes."
+{{- end }}

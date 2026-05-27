@@ -1,0 +1,16 @@
+{{- if and (eq .Values.metadb.mode "internal") .Values.metadb.internal.backup.enabled }}
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: meta-db-daily
+  namespace: {{ include "etalbaas.namespace" . }}
+  labels:
+    {{- include "etalbaas.labels" . | nindent 4 }}
+    app.kubernetes.io/component: meta-db
+spec:
+  cluster:
+    name: meta-db
+  schedule: {{ .Values.metadb.internal.backup.schedule | quote }}
+  backupOwnerReference: self
+  immediate: true
+{{- end }}

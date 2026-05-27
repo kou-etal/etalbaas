@@ -1,0 +1,77 @@
+{{- if .Values.services.storage.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: storage
+  namespace: {{ include "etalbaas.namespace" . }}
+  labels:
+    {{- include "etalbaas.serviceLabels" (dict "root" . "component" "storage") | nindent 4 }}
+spec:
+  replicas: {{ .Values.services.storage.replicaCount | default .Values.services.common.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: storage
+      {{- include "etalbaas.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: storage
+        app.kubernetes.io/component: storage
+        {{- include "etalbaas.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: storage-sa
+      automountServiceAccountToken: true
+      securityContext:
+        {{- include "etalbaas.podSecurityContext" . | nindent 8 }}
+      containers:
+        - name: storage
+          image: {{ include "etalbaas.imageRef" (dict "root" . "svc" "storage" "name" "etalbaas-storage") }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          ports:
+            - name: grpc
+              containerPort: {{ .Values.services.common.port }}
+              protocol: TCP
+            - name: metrics
+              containerPort: {{ .Values.services.common.metricsPort }}
+              protocol: TCP
+          env:
+            {{- include "etalbaas.commonEnv" . | nindent 12 }}
+            - name: K8S_ENABLED
+              value: {{ if hasKey .Values.services.storage "k8sEnabled" }}{{ .Values.services.storage.k8sEnabled | quote }}{{ else }}"true"{{ end }}
+            - name: NATS_URL
+              value: {{ .Values.services.storage.natsUrl | default "" | quote }}
+            - name: S3_ENDPOINT
+              value: {{ .Values.services.storage.s3.endpoint | quote }}
+            - name: S3_BUCKET
+              value: {{ .Values.services.storage.s3.bucket | quote }}
+            - name: S3_REGION
+              value: {{ .Values.services.storage.s3.region | quote }}
+            - name: S3_USE_SSL
+              value: {{ .Values.services.storage.s3.useSSL | quote }}
+            - name: S3_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.platformSecretName }}
+                  key: S3_ACCESS_KEY
+            - name: S3_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.platformSecretName }}
+                  key: S3_SECRET_KEY
+          securityContext:
+            {{- include "etalbaas.containerSecurityContext" . | nindent 12 }}
+          resources:
+            {{- toYaml (.Values.services.storage.resources | default .Values.services.common.resources) | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: grpc
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: grpc
+            initialDelaySeconds: 3
+            periodSeconds: 10
+{{- end }}

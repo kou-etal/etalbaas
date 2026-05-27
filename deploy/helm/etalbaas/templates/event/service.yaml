@@ -1,0 +1,23 @@
+{{- if .Values.services.event.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: event
+  namespace: {{ include "etalbaas.namespace" . }}
+  labels:
+    {{- include "etalbaas.serviceLabels" (dict "root" . "component" "event") | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: grpc
+      port: {{ .Values.services.common.port }}
+      targetPort: grpc
+      protocol: TCP
+    - name: metrics
+      port: {{ .Values.services.common.metricsPort }}
+      targetPort: metrics
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: event
+    {{- include "etalbaas.selectorLabels" . | nindent 4 }}
+{{- end }}

@@ -1,0 +1,21 @@
+{{- if and .Values.gateway.enabled .Values.rateLimit.enabled }}
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: BackendTrafficPolicy
+metadata:
+  name: api-rate-limit
+  namespace: {{ include "etalbaas.namespace" . }}
+  labels:
+    {{- include "etalbaas.labels" . | nindent 4 }}
+spec:
+  targetRef:
+    group: gateway.networking.k8s.io
+    kind: HTTPRoute
+    name: etalbaas-dashboard-routes
+  rateLimit:
+    type: Local
+    local:
+      rules:
+        - limit:
+            requests: {{ .Values.rateLimit.requestsPerMinute }}
+            unit: Minute
+{{- end }}

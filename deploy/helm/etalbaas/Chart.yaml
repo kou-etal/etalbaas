@@ -1,0 +1,17 @@
+apiVersion: v2
+name: etalbaas
+description: EtalBaaS - Multi-tenant Backend as a Service Platform
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+kubeVersion: ">=1.28.0"
+home: https://github.com/kou-etal/etalbaas
+sources:
+  - https://github.com/kou-etal/etalbaas
+keywords:
+  - baas
+  - multi-tenant
+  - kubernetes
+  - serverless
+maintainers:
+  - name: kou-etal

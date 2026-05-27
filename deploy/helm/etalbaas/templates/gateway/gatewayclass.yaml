@@ -1,0 +1,10 @@
+{{- if .Values.gateway.enabled }}
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: {{ .Values.gateway.gatewayClassName }}
+  labels:
+    {{- include "etalbaas.labels" . | nindent 4 }}
+spec:
+  controllerName: {{ .Values.gateway.controllerName | quote }}
+{{- end }}

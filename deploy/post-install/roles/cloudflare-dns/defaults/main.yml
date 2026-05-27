@@ -1,0 +1,21 @@
+---
+cloudflare_dns_ttl: 300
+cloudflare_dns_proxied: false
+
+# VIP address (kube-vip virtual IP)
+cloudflare_dns_vip: "203.0.113.100"
+
+# Records to create (wildcard + bare domains)
+cloudflare_dns_records:
+  - name: "*.api.{{ base_domain }}"
+    type: A
+    value: "{{ cloudflare_dns_vip }}"
+  - name: "*.db.{{ base_domain }}"
+    type: A
+    value: "{{ cloudflare_dns_vip }}"
+  - name: "api.{{ base_domain }}"
+    type: A
+    value: "{{ cloudflare_dns_vip }}"
+  - name: "dashboard.{{ base_domain }}"
+    type: A
+    value: "{{ cloudflare_dns_vip }}"

@@ -1,0 +1,109 @@
+{{- if .Values.gotrue.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gotrue-dev
+  namespace: {{ include "etalbaas.namespace" . }}
+  labels:
+    {{- include "etalbaas.serviceLabels" (dict "root" . "component" "gotrue-dev") | nindent 4 }}
+spec:
+  replicas: {{ .Values.gotrue.replicaCount | default 1 }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: gotrue-dev
+      {{- include "etalbaas.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: gotrue-dev
+        app.kubernetes.io/component: gotrue-dev
+        {{- include "etalbaas.selectorLabels" . | nindent 8 }}
+    spec:
+      containers:
+        - name: gotrue
+          image: {{ .Values.gotrue.image.repository }}:{{ .Values.gotrue.image.tag }}
+          imagePullPolicy: {{ .Values.gotrue.image.pullPolicy | default "IfNotPresent" }}
+          ports:
+            - name: http
+              containerPort: 9999
+              protocol: TCP
+          env:
+            - name: GOTRUE_API_HOST
+              value: "0.0.0.0"
+            - name: GOTRUE_API_PORT
+              value: "9999"
+            - name: API_EXTERNAL_URL
+              value: {{ .Values.gotrue.externalUrl | quote }}
+            - name: GOTRUE_SITE_URL
+              value: {{ .Values.gotrue.siteUrl | quote }}
+            - name: GOTRUE_DB_DRIVER
+              value: "postgres"
+            - name: GOTRUE_DB_DATABASE_URL
+              value: "postgres://etalbaas:etalbaas@meta-db-rw.{{ include "etalbaas.namespace" . }}.svc:5432/etalbaas_auth?sslmode=disable"
+            - name: GOTRUE_DB_NAMESPACE
+              value: "auth"
+            - name: GOTRUE_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.platformSecretName }}
+                  key: JWT_SECRET
+            {{- if .Values.gotrue.jwt.useAsymmetric }}
+            - name: GOTRUE_JWT_KEYS
+              valueFrom:
+                secretKeyRef:
+                  name: gotrue-jwt-keys
+                  key: jwk-set
+            {{- end }}
+            - name: GOTRUE_JWT_EXP
+              value: {{ .Values.gotrue.jwt.exp | quote }}
+            - name: GOTRUE_JWT_DEFAULT_GROUP_NAME
+              value: "authenticated"
+            - name: GOTRUE_DISABLE_SIGNUP
+              value: {{ .Values.gotrue.disableSignup | quote }}
+            {{- if .Values.gotrue.email.enabled }}
+            - name: GOTRUE_EXTERNAL_EMAIL_ENABLED
+              value: "true"
+            - name: GOTRUE_MAILER_AUTOCONFIRM
+              value: {{ .Values.gotrue.email.autoconfirm | quote }}
+            {{- end }}
+            {{- if .Values.gotrue.github.enabled }}
+            - name: GOTRUE_EXTERNAL_GITHUB_ENABLED
+              value: "true"
+            - name: GOTRUE_EXTERNAL_GITHUB_CLIENT_ID
+              value: {{ .Values.gotrue.github.clientId | quote }}
+            - name: GOTRUE_EXTERNAL_GITHUB_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.platformSecretName }}
+                  key: GITHUB_OAUTH_SECRET
+            - name: GOTRUE_EXTERNAL_GITHUB_REDIRECT_URI
+              value: {{ .Values.gotrue.github.redirectUri | quote }}
+            {{- end }}
+            {{- if .Values.gotrue.google.enabled }}
+            - name: GOTRUE_EXTERNAL_GOOGLE_ENABLED
+              value: "true"
+            - name: GOTRUE_EXTERNAL_GOOGLE_CLIENT_ID
+              value: {{ .Values.gotrue.google.clientId | quote }}
+            - name: GOTRUE_EXTERNAL_GOOGLE_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.platformSecretName }}
+                  key: GOOGLE_OAUTH_SECRET
+            - name: GOTRUE_EXTERNAL_GOOGLE_REDIRECT_URI
+              value: {{ .Values.gotrue.google.redirectUri | quote }}
+            {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.gotrue.resources | nindent 12 }}
+{{- end }}

@@ -1,0 +1,19 @@
+{{- if .Values.gotrue.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: gotrue-dev
+  namespace: {{ include "etalbaas.namespace" . }}
+  labels:
+    {{- include "etalbaas.serviceLabels" (dict "root" . "component" "gotrue-dev") | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 9999
+      targetPort: http
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: gotrue-dev
+    {{- include "etalbaas.selectorLabels" . | nindent 4 }}
+{{- end }}

@@ -1,0 +1,412 @@
+{{- if .Values.observability.serviceMonitor.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-platform
+  namespace: {{ include "etalbaas.namespace" . }}
+  labels:
+    grafana_dashboard: "1"
+    {{- include "etalbaas.labels" . | nindent 4 }}
+data:
+  etalbaas-platform.json: |-
+    {
+      "annotations": { "list": [] },
+      "editable": true,
+      "fiscalYearStartMonth": 0,
+      "graphTooltip": 1,
+      "id": null,
+      "links": [],
+      "panels": [
+        {
+          "title": "Service Health",
+          "type": "stat",
+          "gridPos": { "h": 4, "w": 24, "x": 0, "y": 0 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "up{namespace=\"{{ include "etalbaas.namespace" . }}\"}",
+              "legendFormat": "{{`{{`}}job{{`}}`}}",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "mappings": [
+                { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } }
+              ],
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] }
+            }
+          }
+        },
+        {
+          "title": "Total RPS",
+          "type": "stat",
+          "gridPos": { "h": 4, "w": 6, "x": 0, "y": 4 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "sum(rate(rpc_server_duration_milliseconds_count{namespace=\"{{ include "etalbaas.namespace" . }}\"}[5m]))",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "decimals": 1,
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
+            }
+          }
+        },
+        {
+          "title": "Error Rate",
+          "type": "gauge",
+          "gridPos": { "h": 4, "w": 6, "x": 6, "y": 4 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "100 * sum(rate(rpc_server_duration_milliseconds_count{namespace=\"{{ include "etalbaas.namespace" . }}\", rpc_grpc_status_code!=\"0\"}[5m])) / sum(rate(rpc_server_duration_milliseconds_count{namespace=\"{{ include "etalbaas.namespace" . }}\"}[5m]))",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "decimals": 2,
+              "min": 0,
+              "max": 100,
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 1 }, { "color": "red", "value": 5 }] }
+            }
+          }
+        },
+        {
+          "title": "p95 Latency",
+          "type": "stat",
+          "gridPos": { "h": 4, "w": 6, "x": 12, "y": 4 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "histogram_quantile(0.95, sum(rate(rpc_server_duration_milliseconds_bucket{namespace=\"{{ include "etalbaas.namespace" . }}\"}[5m])) by (le))",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ms",
+              "decimals": 0,
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 200 }, { "color": "red", "value": 500 }] }
+            }
+          }
+        },
+        {
+          "title": "Running Pods",
+          "type": "stat",
+          "gridPos": { "h": 4, "w": 6, "x": 18, "y": 4 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "count(kube_pod_status_phase{namespace=\"{{ include "etalbaas.namespace" . }}\", phase=\"Running\"} == 1)",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
+            }
+          }
+        },
+        {
+          "title": "RPS by Service",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "sum(rate(rpc_server_duration_milliseconds_count{namespace=\"{{ include "etalbaas.namespace" . }}\"}[5m])) by (service_name)",
+              "legendFormat": "{{`{{`}}service_name{{`}}`}}",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "title": "Error Rate by Service (%)",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "100 * sum(rate(rpc_server_duration_milliseconds_count{namespace=\"{{ include "etalbaas.namespace" . }}\", rpc_grpc_status_code!=\"0\"}[5m])) by (service_name) / sum(rate(rpc_server_duration_milliseconds_count{namespace=\"{{ include "etalbaas.namespace" . }}\"}[5m])) by (service_name)",
+              "legendFormat": "{{`{{`}}service_name{{`}}`}}",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percent",
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 1 }, { "color": "red", "value": 5 }] }
+            }
+          }
+        },
+        {
+          "title": "Latency p50 / p95 / p99",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "histogram_quantile(0.50, sum(rate(rpc_server_duration_milliseconds_bucket{namespace=\"{{ include "etalbaas.namespace" . }}\"}[5m])) by (le, service_name))",
+              "legendFormat": "p50 {{`{{`}}service_name{{`}}`}}",
+              "refId": "A"
+            },
+            {
+              "expr": "histogram_quantile(0.95, sum(rate(rpc_server_duration_milliseconds_bucket{namespace=\"{{ include "etalbaas.namespace" . }}\"}[5m])) by (le, service_name))",
+              "legendFormat": "p95 {{`{{`}}service_name{{`}}`}}",
+              "refId": "B"
+            },
+            {
+              "expr": "histogram_quantile(0.99, sum(rate(rpc_server_duration_milliseconds_bucket{namespace=\"{{ include "etalbaas.namespace" . }}\"}[5m])) by (le, service_name))",
+              "legendFormat": "p99 {{`{{`}}service_name{{`}}`}}",
+              "refId": "C"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": { "unit": "ms" }
+          }
+        },
+        {
+          "title": "CPU Usage",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "sum(rate(container_cpu_usage_seconds_total{namespace=\"{{ include "etalbaas.namespace" . }}\", container!=\"\"}[5m])) by (pod)",
+              "legendFormat": "{{`{{`}}pod{{`}}`}}",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": { "unit": "short" }
+          }
+        },
+        {
+          "title": "Memory Usage",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "sum(container_memory_working_set_bytes{namespace=\"{{ include "etalbaas.namespace" . }}\", container!=\"\"}) by (pod)",
+              "legendFormat": "{{`{{`}}pod{{`}}`}}",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": { "unit": "bytes" }
+          }
+        },
+        {
+          "title": "Operator Reconcile Rate",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "sum(rate(controller_runtime_reconcile_total{namespace=\"{{ include "etalbaas.namespace" . }}\"}[5m])) by (controller, result)",
+              "legendFormat": "{{`{{`}}controller{{`}}`}} ({{`{{`}}result{{`}}`}})",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "title": "Platform Logs",
+          "type": "logs",
+          "gridPos": { "h": 10, "w": 24, "x": 0, "y": 32 },
+          "datasource": { "type": "loki", "uid": "loki" },
+          "targets": [
+            {
+              "expr": "{namespace=\"{{ include "etalbaas.namespace" . }}\"}",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "title": "── Pod Health (filtered by $namespace) ──",
+          "type": "text",
+          "gridPos": { "h": 2, "w": 24, "x": 0, "y": 42 },
+          "options": { "mode": "markdown", "content": "" }
+        },
+        {
+          "title": "Pod Status by Phase",
+          "type": "piechart",
+          "gridPos": { "h": 8, "w": 8, "x": 0, "y": 44 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "count(kube_pod_status_phase{namespace=~\"$namespace\"} == 1) by (phase)",
+              "legendFormat": "{{`{{`}}phase{{`}}`}}",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "overrides": [
+              { "matcher": { "id": "byName", "options": "Running" }, "properties": [{ "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } }] },
+              { "matcher": { "id": "byName", "options": "Pending" }, "properties": [{ "id": "color", "value": { "fixedColor": "yellow", "mode": "fixed" } }] },
+              { "matcher": { "id": "byName", "options": "Failed" }, "properties": [{ "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }] },
+              { "matcher": { "id": "byName", "options": "Succeeded" }, "properties": [{ "id": "color", "value": { "fixedColor": "blue", "mode": "fixed" } }] }
+            ]
+          }
+        },
+        {
+          "title": "Pod Restarts (top 10)",
+          "type": "bargauge",
+          "gridPos": { "h": 8, "w": 8, "x": 8, "y": 44 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "topk(10, kube_pod_container_status_restarts_total{namespace=~\"$namespace\"}) > 0",
+              "legendFormat": "{{`{{`}}namespace{{`}}`}}/{{`{{`}}pod{{`}}`}}",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 3 }, { "color": "red", "value": 10 }] }
+            }
+          },
+          "options": { "orientation": "horizontal", "displayMode": "gradient" }
+        },
+        {
+          "title": "Unhealthy Pods",
+          "type": "table",
+          "gridPos": { "h": 8, "w": 8, "x": 16, "y": 44 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "kube_pod_container_status_waiting_reason{namespace=~\"$namespace\"} > 0",
+              "legendFormat": "",
+              "refId": "A",
+              "format": "table",
+              "instant": true
+            }
+          ],
+          "transformations": [
+            { "id": "organize", "options": { "excludeByName": { "Time": true, "Value": true, "__name__": true, "uid": true, "job": true, "instance": true, "endpoint": true, "service": true }, "renameByName": { "namespace": "Namespace", "pod": "Pod", "container": "Container", "reason": "Reason" } } }
+          ]
+        },
+        {
+          "title": "Pod Uptime",
+          "description": "How long each pod has been running",
+          "type": "bargauge",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 52 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "time() - kube_pod_start_time{namespace=~\"$namespace\"} > 0",
+              "legendFormat": "{{`{{`}}namespace{{`}}`}}/{{`{{`}}pod{{`}}`}}",
+              "refId": "A",
+              "instant": true
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "yellow", "value": 300 }, { "color": "green", "value": 3600 }] }
+            }
+          },
+          "options": { "orientation": "horizontal", "displayMode": "gradient" }
+        },
+        {
+          "title": "Container Restarts Over Time",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 52 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "increase(kube_pod_container_status_restarts_total{namespace=~\"$namespace\"}[5m]) > 0",
+              "legendFormat": "{{`{{`}}namespace{{`}}`}}/{{`{{`}}pod{{`}}`}}",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "title": "── Project Namespaces Overview ──",
+          "type": "text",
+          "gridPos": { "h": 2, "w": 24, "x": 0, "y": 60 },
+          "options": { "mode": "markdown", "content": "" }
+        },
+        {
+          "title": "Pods per Project Namespace",
+          "type": "bargauge",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 62 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "count(kube_pod_status_phase{namespace=~\"project-.*\", phase=\"Running\"} == 1) by (namespace)",
+              "legendFormat": "{{`{{`}}namespace{{`}}`}}",
+              "refId": "A",
+              "instant": true
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 15 }, { "color": "red", "value": 20 }] }
+            }
+          },
+          "options": { "orientation": "horizontal", "displayMode": "gradient" }
+        },
+        {
+          "title": "Resource Usage per Project Namespace",
+          "type": "table",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 62 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "sum(container_memory_working_set_bytes{namespace=~\"project-.*\", container!=\"\"}) by (namespace)",
+              "legendFormat": "{{`{{`}}namespace{{`}}`}}",
+              "refId": "A",
+              "format": "table",
+              "instant": true
+            },
+            {
+              "expr": "sum(rate(container_cpu_usage_seconds_total{namespace=~\"project-.*\", container!=\"\"}[5m])) by (namespace)",
+              "legendFormat": "{{`{{`}}namespace{{`}}`}}",
+              "refId": "B",
+              "format": "table",
+              "instant": true
+            }
+          ],
+          "transformations": [
+            { "id": "joinByField", "options": { "byField": "namespace", "mode": "outer" } },
+            { "id": "organize", "options": { "excludeByName": { "Time": true, "Time 1": true, "Time 2": true }, "renameByName": { "namespace": "Namespace", "Value #A": "Memory", "Value #B": "CPU (cores)" } } }
+          ],
+          "fieldConfig": {
+            "overrides": [
+              { "matcher": { "id": "byName", "options": "Memory" }, "properties": [{ "id": "unit", "value": "bytes" }] },
+              { "matcher": { "id": "byName", "options": "CPU (cores)" }, "properties": [{ "id": "unit", "value": "short" }, { "id": "decimals", "value": 3 }] }
+            ]
+          }
+        }
+      ],
+      "schemaVersion": 39,
+      "tags": ["etalbaas", "platform"],
+      "templating": {
+        "list": [
+          {
+            "current": { "text": "All", "value": "$__all" },
+            "datasource": { "type": "prometheus", "uid": "prometheus" },
+            "definition": "label_values(kube_pod_info, namespace)",
+            "includeAll": true,
+            "multi": true,
+            "name": "namespace",
+            "query": "label_values(kube_pod_info, namespace)",
+            "refresh": 2,
+            "regex": "(platform-system|project-.*)",
+            "type": "query"
+          }
+        ]
+      },
+      "time": { "from": "now-1h", "to": "now" },
+      "title": "etalbaas Platform Overview",
+      "uid": "etalbaas-platform"
+    }
+{{- end }}

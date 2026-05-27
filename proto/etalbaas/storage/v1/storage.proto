@@ -1,0 +1,115 @@
+syntax = "proto3";
+
+package etalbaas.storage.v1;
+
+option go_package = "github.com/kou-etal/etalbaas/proto/gen/go/etalbaas/storage/v1;storagev1";
+
+import "google/protobuf/timestamp.proto";
+import "etalbaas/common/v1/common.proto";
+
+// StorageService はバケット管理のみ担当。
+//
+// ファイル操作（upload / download / list / delete / presigned）は全て REST API で実装:
+//   - 設計書「Storage API エンドポイント」セクション参照
+//   - /storage/v1/object/{bucket}/{path} 等のエンドポイント
+//   - データプレーンは REST、メタデータ管理プレーンは gRPC という責務分離
+//
+// storage.buckets / storage.objects はメタDBではなくテナントDB
+// （Project の PostgreSQL）の storage スキーマに存在。
+// Operator が init SQL で自動作成し、RLS でアクセス制御。
+service StorageService {
+  // バケット作成（テナントDBの storage.buckets に INSERT）。
+  // Errors: ALREADY_EXISTS (name重複), NOT_FOUND (project)
+  rpc CreateBucket(CreateBucketRequest) returns (CreateBucketResponse);
+
+  // バケット一覧。
+  // Errors: NOT_FOUND (project)
+  rpc ListBuckets(ListBucketsRequest) returns (ListBucketsResponse);
+
+  // バケット削除（物理削除）。中にオブジェクトが残っていたら拒否。
+  // Errors: NOT_FOUND, FAILED_PRECONDITION (中にオブジェクトが残っている)
+  rpc DeleteBucket(DeleteBucketRequest) returns (DeleteBucketResponse);
+
+  // バケット設定更新（部分更新対応）。
+  // name は変更不可（URL 安定性のため）。変更したい場合は新規作成して移行。
+  // Errors: NOT_FOUND
+  rpc UpdateBucket(UpdateBucketRequest) returns (UpdateBucketResponse);
+}
+
+// repeated string の wrapper。nil = 変更なし、空 values = 全許可にリセット。
+message StringList {
+  repeated string values = 1;
+}
+
+message Bucket {
+  // output_only
+  string id = 1;
+  // output_only
+  string project_id = 2;
+  // プロジェクト内一意。小文字英数字とハイフン、3-63文字（S3規約準拠）。
+  // URLパスに使う: /storage/v1/object/{name}/...
+  string name = 3;
+  // "public" | "protected" | "private"
+  string access_level = 4;
+  // アップロード可能な最大サイズ（バイト）。0 = 制限なし。
+  // 例: 10485760 (10MB)
+  int64 file_size_limit = 5;
+  // アップロード許可する MIME タイプ。空 = 全て許可。
+  // 例: ["image/png", "image/jpeg", "image/webp"]
+  repeated string allowed_mime_types = 6;
+  // output_only
+  google.protobuf.Timestamp created_at = 7;
+  // output_only
+  google.protobuf.Timestamp updated_at = 8;
+}
+
+message CreateBucketRequest {
+  string project_id = 1;
+  // プロジェクト内一意。小文字英数字とハイフン、3-63文字（S3規約準拠）。
+  string name = 2;
+  // "public" | "protected" | "private"
+  string access_level = 3;
+  // アップロード可能な最大サイズ（バイト）。0 = 制限なし。
+  int64 file_size_limit = 4;
+  // アップロード許可する MIME タイプ。空 = 全て許可。
+  repeated string allowed_mime_types = 5;
+}
+
+message CreateBucketResponse {
+  Bucket bucket = 1;
+}
+
+message ListBucketsRequest {
+  string project_id = 1;
+  etalbaas.common.v1.PaginationRequest pagination = 2;
+}
+
+message ListBucketsResponse {
+  repeated Bucket buckets = 1;
+  etalbaas.common.v1.PaginationResponse pagination = 2;
+}
+
+message DeleteBucketRequest {
+  string project_id = 1;
+  string bucket_id = 2;
+}
+
+// 削除前のスナップショットを返す（確認用）。
+message DeleteBucketResponse {
+  Bucket bucket = 1;
+}
+
+message UpdateBucketRequest {
+  string project_id = 1;
+  string bucket_id = 2;
+  // "public" | "protected" | "private"
+  optional string access_level = 3;
+  // アップロード可能な最大サイズ（バイト）。0 = 制限なし。
+  optional int64 file_size_limit = 4;
+  // nil = 変更なし、空 values = 全許可にリセット。
+  StringList allowed_mime_types = 5;
+}
+
+message UpdateBucketResponse {
+  Bucket bucket = 1;
+}

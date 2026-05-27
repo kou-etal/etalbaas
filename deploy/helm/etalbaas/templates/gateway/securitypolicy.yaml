@@ -1,0 +1,46 @@
+{{- if and .Values.gateway.enabled .Values.auth.jwt.jwksUri }}
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: SecurityPolicy
+metadata:
+  name: dashboard-jwt-auth
+  namespace: {{ include "etalbaas.namespace" . }}
+  labels:
+    {{- include "etalbaas.labels" . | nindent 4 }}
+spec:
+  targetRef:
+    group: gateway.networking.k8s.io
+    kind: HTTPRoute
+    name: etalbaas-dashboard-routes
+  cors:
+    allowOrigins:
+      - "https://dashboard.{{ include "etalbaas.baseDomain" . }}"
+    allowMethods:
+      - POST
+      - GET
+      - DELETE
+      - OPTIONS
+    allowHeaders:
+      - content-type
+      - authorization
+      - connect-protocol-version
+    exposeHeaders:
+      - grpc-status
+      - grpc-message
+    maxAge: 86400s
+    allowCredentials: true
+  jwt:
+    providers:
+      - name: gotrue
+        remoteJWKS:
+          uri: {{ .Values.auth.jwt.jwksUri }}
+        {{- if .Values.auth.jwt.issuer }}
+        issuer: {{ .Values.auth.jwt.issuer | quote }}
+        {{- end }}
+        {{- if .Values.auth.jwt.audiences }}
+        audiences:
+          {{- toYaml .Values.auth.jwt.audiences | nindent 10 }}
+        {{- end }}
+        claimToHeaders:
+          - header: X-User-Id
+            claim: sub
+{{- end }}

@@ -1,0 +1,44 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: nats
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  project: default
+  source:
+    repoURL: https://nats-io.github.io/k8s/helm/charts
+    chart: nats
+    targetRevision: v1.2.7
+    helm:
+      values: |
+        config:
+          cluster:
+            enabled: true
+          jetstream:
+            enabled: true
+            fileStore:
+              pvc:
+                size: 10Gi
+          monitor:
+            enabled: true
+        container:
+          merge:
+            resources:
+              requests:
+                cpu: 100m
+                memory: 256Mi
+        podTemplate:
+          merge:
+            spec:
+              replicas: 3
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: platform-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

@@ -1,0 +1,127 @@
+{{- if .Values.operator.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: etalbaas-operator
+  namespace: {{ include "etalbaas.namespace" . }}
+  labels:
+    {{- include "etalbaas.serviceLabels" (dict "root" . "component" "operator") | nindent 4 }}
+spec:
+  replicas: {{ .Values.operator.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: operator
+      {{- include "etalbaas.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: operator
+        app.kubernetes.io/component: operator
+        {{- include "etalbaas.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: etalbaas-operator
+      automountServiceAccountToken: true
+      securityContext:
+        {{- include "etalbaas.podSecurityContext" . | nindent 8 }}
+      containers:
+        - name: operator
+          image: {{ include "etalbaas.operatorImageRef" . }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          args:
+            - --metrics-bind-address=:8080
+            - --health-probe-bind-address=:8081
+            {{- if .Values.operator.leaderElection }}
+            - --leader-elect=true
+            {{- end }}
+          ports:
+            - name: metrics
+              containerPort: 8080
+              protocol: TCP
+            - name: health
+              containerPort: 8081
+              protocol: TCP
+          env:
+            - name: PLATFORM_NAMESPACE
+              value: {{ include "etalbaas.namespace" . | quote }}
+            - name: BASE_DOMAIN
+              value: {{ .Values.global.baseDomain | quote }}
+            - name: REGISTRY_ENDPOINT
+              value: {{ printf "zot.%s.svc:5000" (include "etalbaas.namespace" .) | quote }}
+            - name: REGISTRY_INSECURE
+              value: {{ .Values.operator.config.registryInsecure | default false | quote }}
+            - name: NATS_ENDPOINT
+              value: {{ printf "nats.%s.svc:4222" (include "etalbaas.namespace" .) | quote }}
+            - name: NATS_MONITORING_ENDPOINT
+              value: {{ printf "nats-headless.%s.svc:8222" (include "etalbaas.namespace" .) | quote }}
+            - name: GATEWAY_NAME
+              value: {{ .Values.operator.config.gatewayName | quote }}
+            - name: GATEWAY_NAMESPACE
+              value: {{ .Values.operator.config.gatewayNamespace | quote }}
+            - name: CDC_IMAGE
+              value: {{ .Values.operator.config.cdcImage | quote }}
+            - name: NATS_SIDECAR_IMAGE
+              value: {{ .Values.operator.config.natsSidecarImage | quote }}
+            - name: POSTGREST_IMAGE
+              value: {{ .Values.operator.config.postgrestImage | quote }}
+            - name: REDIS_IMAGE
+              value: {{ .Values.operator.config.redisImage | quote }}
+            - name: KANIKO_IMAGE
+              value: {{ .Values.operator.config.kanikoImage | quote }}
+            - name: BUILD_TIMEOUT_MINUTES
+              value: {{ .Values.operator.config.buildTimeoutMinutes | quote }}
+            - name: DISPATCHER_IMAGE
+              value: {{ .Values.operator.config.dispatcherImage | quote }}
+            - name: POSTGRES_META_IMAGE
+              value: {{ .Values.operator.config.postgresMetaImage | quote }}
+            - name: GOTRUE_IMAGE
+              value: {{ .Values.operator.config.gotrueImage | quote }}
+            - name: SANDBOX_RUNTIME_CLASS
+              value: {{ .Values.operator.config.sandboxRuntimeClass | default "" | quote }}
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.platformSecretName }}
+                  key: JWT_SECRET
+            - name: MAX_TOTAL_PROJECTS
+              value: {{ .Values.operator.config.maxTotalProjects | quote }}
+            - name: MAX_CONCURRENT_BUILDS
+              value: {{ .Values.operator.config.maxConcurrentBuilds | quote }}
+            - name: FREE_PLAN_CPU
+              value: {{ .Values.operator.config.freePlanQuota.cpu | quote }}
+            - name: FREE_PLAN_MEMORY
+              value: {{ .Values.operator.config.freePlanQuota.memory | quote }}
+            - name: FREE_PLAN_PODS
+              value: {{ .Values.operator.config.freePlanQuota.pods | quote }}
+            - name: GPU_ENABLED
+              value: {{ .Values.gpu.enabled | quote }}
+            {{- if .Values.gpu.enabled }}
+            - name: GPU_DEFAULT_PROVIDER
+              value: {{ .Values.gpu.defaultProvider | quote }}
+            {{- if .Values.gpu.providers.runpod.enabled }}
+            - name: GPU_RUNPOD_API_KEY_SECRET
+              value: {{ .Values.gpu.providers.runpod.apiKeySecret | quote }}
+            {{- end }}
+            {{- if .Values.gpu.providers.selfManaged.enabled }}
+            - name: GPU_SELF_MANAGED_RUNTIME_CLASS
+              value: {{ .Values.gpu.providers.selfManaged.runtimeClass | quote }}
+            - name: GPU_SELF_MANAGED_RESOURCE_LIMIT
+              value: {{ .Values.gpu.providers.selfManaged.resourceLimit | quote }}
+            {{- end }}
+            {{- end }}
+          securityContext:
+            {{- include "etalbaas.containerSecurityContext" . | nindent 12 }}
+          resources:
+            {{- toYaml .Values.operator.resources | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 10
+{{- end }}

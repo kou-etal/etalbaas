@@ -1,0 +1,179 @@
+syntax = "proto3";
+
+package etalbaas.project.v1;
+
+option go_package = "github.com/kou-etal/etalbaas/proto/gen/go/etalbaas/project/v1;projectv1";
+
+import "google/protobuf/timestamp.proto";
+import "etalbaas/common/v1/common.proto";
+
+service ProjectService {
+  
+  // プロジェクト作成。Operator が NS + リソースを作成。
+  // Errors: INVALID_ARGUMENT, RESOURCE_EXHAUSTED (プロジェクト上限)
+  rpc CreateProject(CreateProjectRequest) returns (CreateProjectResponse);
+
+  // 自分のプロジェクト一覧。
+  rpc ListProjects(ListProjectsRequest) returns (ListProjectsResponse);
+
+  // プロジェクト詳細。
+  // Errors: NOT_FOUND
+  rpc GetProject(GetProjectRequest) returns (GetProjectResponse);
+
+  // プロジェクト削除（メタDB status 更新）。
+// 実リソース（NS, Pod, DB）の削除は Operator が非同期で処理。
+  // Errors: NOT_FOUND
+  rpc DeleteProject(DeleteProjectRequest) returns (DeleteProjectResponse);
+
+  // プロジェクト一時停止。
+  // Errors: NOT_FOUND, FAILED_PRECONDITION (既にpaused)
+  rpc PauseProject(PauseProjectRequest) returns (PauseProjectResponse);
+
+  // プロジェクト再開。
+  // Errors: NOT_FOUND, FAILED_PRECONDITION (paused以外)
+  rpc ResumeProject(ResumeProjectRequest) returns (ResumeProjectResponse);
+
+  // API キー発行。raw_key は CreateApiKeyResponse でのみ返却。
+  // Errors: NOT_FOUND (project), ALREADY_EXISTS (name重複)
+  rpc CreateApiKey(CreateApiKeyRequest) returns (CreateApiKeyResponse);
+
+  // API キー一覧。
+  // Errors: NOT_FOUND (project)
+  rpc ListApiKeys(ListApiKeysRequest) returns (ListApiKeysResponse);
+
+  // API キー無効化。
+  // Errors: NOT_FOUND
+  rpc RevokeApiKey(RevokeApiKeyRequest) returns (RevokeApiKeyResponse);
+}
+
+message Project {
+  // output_only. 8文字ランダム（= サブドメイン）
+  string id = 1;
+  // output_only
+  string tenant_id = 2;
+  // 最大100文字。
+  string display_name = 3;
+  // 最大500文字。
+  string description = 4;
+  // output_only. "pending" | "provisioning" | "ready" | "paused" | "failed" | "deleted"
+  string status = 5;
+  bool postgres_enabled = 6;
+  // 許可値: "pgvector" | "pgcrypto"
+  repeated string postgres_extensions = 7;
+  bool redis_enabled = 8;
+  bool postgrest_enabled = 9;
+  // output_only
+  google.protobuf.Timestamp created_at = 10;
+  // output_only
+  google.protobuf.Timestamp updated_at = 11;
+}
+
+message ApiKey {
+  // output_only
+  string id = 1;
+  // output_only
+  string project_id = 2;
+  // 最大63文字。
+  string name = 3;
+  // output_only. 先頭8文字（表示用）
+  string key_prefix = 4;
+  // "anon" | "service_role"
+  string role = 5;
+  // output_only. 未設定 = 無期限（expires_in_days=0 で作成時）
+  google.protobuf.Timestamp expires_at = 6;
+  // output_only
+  google.protobuf.Timestamp revoked_at = 7;
+  // output_only
+  google.protobuf.Timestamp created_at = 8;
+}
+
+message CreateProjectRequest {
+  // 最大100文字。
+  string display_name = 1;
+  // 最大500文字。
+  string description = 2;
+  bool postgres_enabled = 3;
+  // 許可値: "pgvector" | "pgcrypto"
+  repeated string postgres_extensions = 4;
+  bool redis_enabled = 5;
+  bool postgrest_enabled = 6;
+}
+
+message CreateProjectResponse {
+  Project project = 1;
+}
+
+message ListProjectsRequest {
+  etalbaas.common.v1.PaginationRequest pagination = 1;
+}
+
+message ListProjectsResponse {
+  repeated Project projects = 1;
+  etalbaas.common.v1.PaginationResponse pagination = 2;
+}
+
+message GetProjectRequest {
+  string project_id = 1;
+}
+
+message GetProjectResponse {
+  Project project = 1;
+}
+
+message DeleteProjectRequest {
+  string project_id = 1;
+}
+
+message DeleteProjectResponse {
+  Project project = 1;
+}
+
+message PauseProjectRequest {
+  string project_id = 1;
+}
+
+message PauseProjectResponse {
+  Project project = 1;
+}
+
+message ResumeProjectRequest {
+  string project_id = 1;
+}
+
+message ResumeProjectResponse {
+  Project project = 1;
+}
+
+message CreateApiKeyRequest {
+  string project_id = 1;
+  // 最大63文字。
+  string name = 2;
+  // "anon" | "service_role"
+  string role = 3;
+  // 有効期限（日数）。未指定 = 90日。0 = 無期限。
+  optional int32 expires_in_days = 4;
+}
+
+message CreateApiKeyResponse {
+  ApiKey api_key = 1;
+  string raw_key = 2;
+}
+
+message ListApiKeysRequest {
+  string project_id = 1;
+  etalbaas.common.v1.PaginationRequest pagination = 2;
+}
+
+message ListApiKeysResponse {
+  repeated ApiKey api_keys = 1;
+  etalbaas.common.v1.PaginationResponse pagination = 2;
+}
+
+message RevokeApiKeyRequest {
+  string project_id = 1;
+  string api_key_id = 2;
+}
+
+message RevokeApiKeyResponse {
+  ApiKey api_key = 1;
+}

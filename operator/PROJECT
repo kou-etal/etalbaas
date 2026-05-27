@@ -1,0 +1,25 @@
+domain: etalbaas.io
+layout:
+- go.kubebuilder.io/v4
+projectName: operator
+repo: github.com/kou-etal/etalbaas/operator
+resources:
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: etalbaas.io
+  group: etalbaas
+  kind: Project
+  path: github.com/kou-etal/etalbaas/operator/api/v1alpha1
+  version: v1alpha1
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: etalbaas.io
+  group: etalbaas
+  kind: Function
+  path: github.com/kou-etal/etalbaas/operator/api/v1alpha1
+  version: v1alpha1
+version: "4"

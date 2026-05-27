@@ -1,0 +1,54 @@
+{{- if .Values.services.tenantUser.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tenant-user
+  namespace: {{ include "etalbaas.namespace" . }}
+  labels:
+    {{- include "etalbaas.serviceLabels" (dict "root" . "component" "tenant-user") | nindent 4 }}
+spec:
+  replicas: {{ .Values.services.tenantUser.replicaCount | default .Values.services.common.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: tenant-user
+      {{- include "etalbaas.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: tenant-user
+        app.kubernetes.io/component: tenant-user
+        {{- include "etalbaas.selectorLabels" . | nindent 8 }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        {{- include "etalbaas.podSecurityContext" . | nindent 8 }}
+      containers:
+        - name: tenant-user
+          image: {{ include "etalbaas.imageRef" (dict "root" . "svc" "tenantUser" "name" "etalbaas-tenant-user") }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          ports:
+            - name: grpc
+              containerPort: {{ .Values.services.common.port }}
+              protocol: TCP
+            - name: metrics
+              containerPort: {{ .Values.services.common.metricsPort }}
+              protocol: TCP
+          env:
+            {{- include "etalbaas.commonEnv" . | nindent 12 }}
+          securityContext:
+            {{- include "etalbaas.containerSecurityContext" . | nindent 12 }}
+          resources:
+            {{- toYaml (.Values.services.tenantUser.resources | default .Values.services.common.resources) | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: grpc
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: grpc
+            initialDelaySeconds: 3
+            periodSeconds: 10
+{{- end }}

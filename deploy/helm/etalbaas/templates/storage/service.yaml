@@ -1,0 +1,23 @@
+{{- if .Values.services.storage.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: storage
+  namespace: {{ include "etalbaas.namespace" . }}
+  labels:
+    {{- include "etalbaas.serviceLabels" (dict "root" . "component" "storage") | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: grpc
+      port: {{ .Values.services.common.port }}
+      targetPort: grpc
+      protocol: TCP
+    - name: metrics
+      port: {{ .Values.services.common.metricsPort }}
+      targetPort: metrics
+      protocol: TCP
+  selector:
+    app.kubernetes.io/name: storage
+    {{- include "etalbaas.selectorLabels" . | nindent 4 }}
+{{- end }}

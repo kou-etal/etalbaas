@@ -1,0 +1,96 @@
+syntax = "proto3";
+
+package etalbaas.event.v1;
+
+option go_package = "github.com/kou-etal/etalbaas/proto/gen/go/etalbaas/event/v1;eventv1";
+
+import "google/protobuf/timestamp.proto";
+import "etalbaas/common/v1/common.proto";
+
+// EventService はイベント履歴参照 + 失敗イベントのリトライを担当。http経路はevent ms経由しない。
+
+service EventService {
+  // イベント発火履歴一覧。
+  // Errors: NOT_FOUND (project)
+  rpc ListEventHistory(ListEventHistoryRequest) returns (ListEventHistoryResponse);
+
+  // 失敗イベントの再実行。Phase 2 で実装予定。
+  // Errors: NOT_FOUND, FAILED_PRECONDITION (status != failed)
+  rpc RetryEvent(RetryEventRequest) returns (RetryEventResponse);
+}
+
+// イベント発火時のソース情報。
+// Function.Trigger（設定: 「INSERT/UPDATE で発火する」等）とは別の概念で、
+// 実際に発生したイベントの「実績」（今回 INSERT が発火した、等）を表す。
+
+message DatabaseChangeSource {
+  string table = 1;
+  // 今回発火した具体的なイベント
+  // "INSERT" | "UPDATE" | "DELETE"
+  string event = 2;
+}
+
+message ObjectStorageSource {
+  string bucket = 1;
+  // 今回発火したオブジェクトのキー（パス）
+  string object_key = 2;
+  // "ObjectCreated" | "ObjectRemoved" (S3/R2 イベント名規約に準拠)
+  string event = 3;
+}
+
+message TriggerInfo {
+  oneof source {
+    DatabaseChangeSource database_change = 1;
+    ObjectStorageSource object_storage = 2;
+  }
+}
+
+// output_only（全フィールド読み取り専用）
+message EventRecord {
+  string id = 1;
+  string project_id = 2;
+  string function_id = 3;
+  // 関連する Function Invocation の ID。
+  // Pod 起動に至らなかった場合（受信直後、起動前にエラー）は空文字。
+  // 複数回試行した場合は最後の Invocation の ID。
+  string invocation_id = 4;
+  TriggerInfo trigger = 5;
+  // 状態遷移:
+  //   received → retrying → delivered（成功）
+  //                        → failed（3回失敗して NATS から破棄）
+  //   received:  NATS publish 済み、Function 起動待ち
+  //   retrying:  1-2回目失敗、リトライ中
+  //   delivered: Function Pod が ACK（成功）
+  //   failed:    3回失敗して破棄、ペイロードは消失
+  string status = 6;
+  int32 attempt_count = 7;
+  // エラー要約（最大1024文字）。フルログは Loki、trace_id で検索可能。
+  string last_error = 8;
+  // 最後の試行の OpenTelemetry trace ID（Tempo/Loki連携）
+  string trace_id = 9;
+  google.protobuf.Timestamp created_at = 10;
+}
+
+message ListEventHistoryRequest {
+  string project_id = 1;
+  string function_id = 2;
+  // "received" | "delivered" | "retrying" | "failed"
+  optional string status_filter = 3;
+  optional google.protobuf.Timestamp since = 4;
+  optional google.protobuf.Timestamp until = 5;
+  etalbaas.common.v1.PaginationRequest pagination = 6;
+}
+
+message ListEventHistoryResponse {
+  repeated EventRecord events = 1;
+  etalbaas.common.v1.PaginationResponse pagination = 2;
+}
+
+message RetryEventRequest {
+  string project_id = 1;
+  string event_id = 2;
+}
+
+message RetryEventResponse {
+  EventRecord event = 1;
+}

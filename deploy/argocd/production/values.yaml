@@ -1,0 +1,86 @@
+# Production environment overrides for EtalBaaS Helm chart.
+# This file is referenced by deploy/argocd/apps/etalbaas.yaml.
+# Values here merge with (and override) deploy/helm/etalbaas/values.yaml.
+
+global:
+  baseDomain: "etalbaas.example.com"        # TODO: Replace with actual domain
+  environment: "production"
+  imageRegistry: "ghcr.io/kou-etal"
+
+services:
+  common:
+    replicaCount: 2
+
+  tenantUser:
+    replicaCount: 2
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
+
+  project:
+    replicaCount: 2
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
+
+  function:
+    replicaCount: 2
+    resources:
+      requests:
+        cpu: 200m
+        memory: 256Mi
+      limits:
+        cpu: "1"
+        memory: 512Mi
+
+  event:
+    replicaCount: 2
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
+
+  storage:
+    replicaCount: 2
+    s3:
+      endpoint: ""                            # TODO: Replace with R2/MinIO endpoint
+      bucket: "etalbaas-storage"
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
+
+certManager:
+  issuer:
+    email: "admin@etalbaas.example.com"       # TODO: Replace with actual email
+
+metadb:
+  internal:
+    instances: 3
+    storage: 20Gi
+    backup:
+      enabled: true
+      endpoint: ""                            # TODO: Replace with R2/S3 endpoint
+      region: "auto"
+      bucket: "etalbaas-backups"
+      credentialsSecret: "r2-backup-creds"
+      schedule: "0 2 * * *"
+      retentionDays: 30
+
+gotrue:
+  externalUrl: "https://auth.etalbaas.example.com"    # TODO: Replace
+  siteUrl: "https://dashboard.etalbaas.example.com"   # TODO: Replace

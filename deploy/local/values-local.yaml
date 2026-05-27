@@ -1,0 +1,137 @@
+# Local Kind development overrides
+global:
+  baseDomain: "local.etalbaas.dev"
+  platformNamespace: "etalbaas"
+  environment: "development"
+  imageRegistry: "docker.io/library"
+  imagePullPolicy: Never  # Use pre-loaded images
+
+services:
+  common:
+    replicaCount: 1
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi
+
+  tenantUser:
+    enabled: true
+    image:
+      repository: "etalbaas-tenant-user"
+      tag: "local"
+
+  project:
+    enabled: true
+    image:
+      repository: "etalbaas-project"
+      tag: "local"
+
+  function:
+    enabled: true
+    image:
+      repository: "etalbaas-function"
+      tag: "local"
+    k8sEnabled: true
+
+  event:
+    enabled: true
+    image:
+      repository: "etalbaas-event"
+      tag: "local"
+
+  storage:
+    enabled: true
+    image:
+      repository: "etalbaas-storage"
+      tag: "local"
+    k8sEnabled: false
+    s3:
+      endpoint: "minio.etalbaas.svc:9000"
+      bucket: "etalbaas-storage"
+      region: "us-east-1"
+      useSSL: false
+
+operator:
+  enabled: true
+  image:
+    repository: "etalbaas-operator"
+    tag: "local"
+  config:
+    gatewayNamespace: "etalbaas"
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+dashboard:
+  enabled: true
+  image:
+    repository: "etalbaas-dashboard"
+    tag: "local"
+  replicaCount: 1
+
+gateway:
+  enabled: true
+  gatewayClassName: "eg"
+  controllerName: "gateway.envoyproxy.io/gatewayclass-controller"
+  listeners:
+    http:
+      port: 80
+    https:
+      port: 443
+    postgres:
+      port: 5432
+
+certManager:
+  enabled: false  # Use self-signed for local
+
+metadb:
+  mode: "external"
+  external:
+    host: "postgres.etalbaas.svc"
+    port: 5432
+    database: "etalbaas_meta"
+    credentialsSecret: "platform-secrets"
+  migration:
+    enabled: true
+    image: "migrate/migrate:latest"
+
+gotrue:
+  enabled: true
+  image:
+    repository: "supabase/gotrue"
+    tag: "v2.158.1"
+  externalUrl: "https://auth.local.etalbaas.dev"
+  siteUrl: "https://dashboard.local.etalbaas.dev"
+  jwt:
+    exp: 86400
+    useAsymmetric: true
+  disableSignup: false
+  email:
+    enabled: true
+    autoconfirm: true
+  github:
+    enabled: false
+  google:
+    enabled: true
+    clientId: "804459219252-537iqeavf5j5gjlrrvho31g2rdjlevaj.apps.googleusercontent.com"
+    redirectUri: "https://auth.local.etalbaas.dev/callback"
+
+auth:
+  jwt:
+    jwksUri: "http://gotrue-dev.etalbaas.svc:9999/.well-known/jwks.json"
+    issuer: ""
+    audiences: []
+
+secrets:
+  platformSecretName: "platform-secrets"
+
+gpu:
+  enabled: false

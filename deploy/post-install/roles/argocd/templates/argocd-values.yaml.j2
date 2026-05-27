@@ -1,0 +1,48 @@
+---
+# ArgoCD Helm values - Phase 1 (non-HA, internal access only)
+
+global:
+  logging:
+    level: info
+
+# Disable HA for Phase 1 (2-node cluster)
+controller:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+server:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+repoServer:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+applicationSet:
+  replicas: 1
+
+# Admin password (bcrypt hash from Ansible Vault)
+configs:
+  secret:
+    argocdServerAdminPassword: "{{ argocd_admin_password_hash }}"
+  params:
+    server.insecure: {{ argocd_server_insecure | lower }}
+    timeout.reconciliation: 180s

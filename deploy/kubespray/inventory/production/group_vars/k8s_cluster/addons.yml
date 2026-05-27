@@ -1,0 +1,16 @@
+---
+# EtalBaaS - kubespray addons and firewall configuration
+
+# Additional firewall ports (platform services exposed to public)
+additional_open_ports:
+  - port: 80
+    protocol: tcp
+  - port: 443
+    protocol: tcp
+  - port: 5432
+    protocol: tcp
+
+# NOTE: In production, restrict SSH (port 22) to admin IPs only.
+# Configure via nftables source filter or cloud provider firewall:
+#   nftables_custom_rules:
+#     - "ip saddr { ADMIN_IP_1, ADMIN_IP_2 } tcp dport 22 accept"

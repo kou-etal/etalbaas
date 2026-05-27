@@ -1,0 +1,23 @@
+---
+# Ansible Vault — Infrastructure Secrets
+#
+# Setup:
+#   cp vault.yml.example vault.yml
+#   # fill in values
+#   ansible-vault encrypt vault.yml
+#   echo 'your-password' > .vault-password
+
+# ─── Sealed Secrets TLS keypair ─────────────────────────────────────────────
+# Generate: openssl req -x509 -nodes -newkey rsa:4096 -keyout tls.key -out tls.crt -days 3650
+# Paste base64-encoded values here.
+# Recovery: reuse the same key to decrypt old SealedSecrets.
+sealed_secrets_tls_crt: ""
+sealed_secrets_tls_key: ""
+
+# ─── ArgoCD ─────────────────────────────────────────────────────────────────
+# Generate: htpasswd -nbBC 10 "" 'your-password' | tr -d ':\n' | sed 's/$2y/$2a/'
+argocd_admin_password_hash: ""
+
+# ─── Cloudflare (DNS + cert-manager) ────────────────────────────────────────
+cloudflare_api_token: ""
+cloudflare_zone_id: ""

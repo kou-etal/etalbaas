@@ -1,0 +1,15 @@
+go 1.26.0
+
+use (
+	./operator
+	./pkg
+	./proto
+	./services/cdc-pod
+	./services/event
+	./services/function
+	./services/nats-sidecar
+	./services/project
+	./services/storage
+	./services/tenant-user
+	./storage-providers
+)

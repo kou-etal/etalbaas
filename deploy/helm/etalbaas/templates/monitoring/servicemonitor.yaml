@@ -1,0 +1,21 @@
+{{- if .Values.observability.serviceMonitor.enabled }}
+{{- $services := list "tenant-user" "project" "function" "event" "storage" }}
+{{- range $svc := $services }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ $svc }}
+  namespace: {{ include "etalbaas.namespace" $ }}
+  labels:
+    {{- include "etalbaas.serviceLabels" (dict "root" $ "component" $svc) | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $svc }}
+  endpoints:
+    - port: metrics
+      interval: {{ $.Values.observability.serviceMonitor.interval }}
+      path: /metrics
+{{- end }}
+{{- end }}

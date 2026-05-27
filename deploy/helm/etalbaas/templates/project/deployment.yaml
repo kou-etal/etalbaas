@@ -1,0 +1,59 @@
+{{- if .Values.services.project.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: project
+  namespace: {{ include "etalbaas.namespace" . }}
+  labels:
+    {{- include "etalbaas.serviceLabels" (dict "root" . "component" "project") | nindent 4 }}
+spec:
+  replicas: {{ .Values.services.project.replicaCount | default .Values.services.common.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: project
+      {{- include "etalbaas.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: project
+        app.kubernetes.io/component: project
+        {{- include "etalbaas.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: project-sa
+      automountServiceAccountToken: true
+      securityContext:
+        {{- include "etalbaas.podSecurityContext" . | nindent 8 }}
+      containers:
+        - name: project
+          image: {{ include "etalbaas.imageRef" (dict "root" . "svc" "project" "name" "etalbaas-project") }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          ports:
+            - name: grpc
+              containerPort: {{ .Values.services.common.port }}
+              protocol: TCP
+            - name: metrics
+              containerPort: {{ .Values.services.common.metricsPort }}
+              protocol: TCP
+          env:
+            {{- include "etalbaas.commonEnv" . | nindent 12 }}
+            - name: K8S_ENABLED
+              value: {{ .Values.services.project.k8sEnabled | default "true" | quote }}
+            - name: PLATFORM_NAMESPACE
+              value: {{ include "etalbaas.namespace" . | quote }}
+          securityContext:
+            {{- include "etalbaas.containerSecurityContext" . | nindent 12 }}
+          resources:
+            {{- toYaml (.Values.services.project.resources | default .Values.services.common.resources) | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: grpc
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: grpc
+            initialDelaySeconds: 3
+            periodSeconds: 10
+{{- end }}

@@ -1,0 +1,71 @@
+{{- if .Values.services.function.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: function
+  namespace: {{ include "etalbaas.namespace" . }}
+  labels:
+    {{- include "etalbaas.serviceLabels" (dict "root" . "component" "function") | nindent 4 }}
+spec:
+  replicas: {{ .Values.services.function.replicaCount | default .Values.services.common.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: function
+      {{- include "etalbaas.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: function
+        app.kubernetes.io/component: function
+        {{- include "etalbaas.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: function-sa
+      automountServiceAccountToken: true
+      securityContext:
+        {{- include "etalbaas.podSecurityContext" . | nindent 8 }}
+      containers:
+        - name: function
+          image: {{ include "etalbaas.imageRef" (dict "root" . "svc" "function" "name" "etalbaas-function") }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          ports:
+            - name: grpc
+              containerPort: {{ .Values.services.common.port }}
+              protocol: TCP
+            - name: metrics
+              containerPort: {{ .Values.services.common.metricsPort }}
+              protocol: TCP
+          env:
+            {{- include "etalbaas.commonEnv" . | nindent 12 }}
+            - name: K8S_ENABLED
+              value: {{ .Values.services.function.k8sEnabled | quote }}
+            {{- if .Values.gpu.enabled }}
+            - name: GPU_ENABLED
+              value: "true"
+            - name: PLATFORM_NAMESPACE
+              value: {{ include "etalbaas.namespace" . }}
+            - name: DISPATCHER_IMAGE
+              value: {{ .Values.operator.config.dispatcherImage | quote }}
+            - name: SANDBOX_RUNTIME_CLASS
+              value: {{ .Values.operator.config.sandboxRuntimeClass | quote }}
+            {{- if .Values.gpu.providers.runpod.enabled }}
+            - name: GPU_API_KEY_SECRET
+              value: {{ .Values.gpu.providers.runpod.apiKeySecret | quote }}
+            {{- end }}
+            {{- end }}
+          securityContext:
+            {{- include "etalbaas.containerSecurityContext" . | nindent 12 }}
+          resources:
+            {{- toYaml (.Values.services.function.resources | default .Values.services.common.resources) | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: grpc
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: grpc
+            initialDelaySeconds: 3
+            periodSeconds: 10
+{{- end }}

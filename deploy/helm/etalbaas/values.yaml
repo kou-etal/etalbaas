@@ -1,0 +1,261 @@
+# ─── Global ──��───────────────────────────────────────────────────────────────
+global:
+  baseDomain: "yourdomain.com"
+  platformNamespace: "platform-system"
+  environment: "production"
+  imageRegistry: "ghcr.io/kou-etal"
+  imagePullPolicy: IfNotPresent
+
+# ─── Platform Services ────────────────────────────────────────────────────────
+services:
+  common:
+    port: 8080
+    metricsPort: 9090
+    otelEndpoint: "tempo.monitoring.svc:4317"
+    replicaCount: 2
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
+
+  tenantUser:
+    enabled: true
+    image:
+      repository: ""
+      tag: "v0.1.0"
+    replicaCount: null
+    resources: {}
+
+  project:
+    enabled: true
+    image:
+      repository: ""
+      tag: "v0.1.0"
+    replicaCount: null
+    resources: {}
+
+  function:
+    enabled: true
+    image:
+      repository: ""
+      tag: "v0.1.0"
+    replicaCount: null
+    resources: {}
+    k8sEnabled: true
+
+  event:
+    enabled: true
+    image:
+      repository: ""
+      tag: "v0.1.0"
+    replicaCount: null
+    resources: {}
+
+  storage:
+    enabled: true
+    image:
+      repository: ""
+      tag: "v0.1.0"
+    replicaCount: null
+    resources: {}
+    natsUrl: "nats://nats.etalbaas.svc:4222"
+    s3:
+      endpoint: ""
+      bucket: "etalbaas-storage"
+      region: "auto"
+      useSSL: true
+
+# ─── Platform Operator ────────────────────────────────────────────────────────
+operator:
+  enabled: true
+  image:
+    repository: ""
+    tag: "v0.1.0"
+  replicaCount: 1
+  leaderElection: true
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+  config:
+    registryEndpoint: "zot.platform-system.svc:5000"
+    registryInsecure: false  # Set to true for local/dev HTTP registries
+    natsEndpoint: "nats.platform-system.svc:4222"
+    natsMonitoringEndpoint: "nats-headless.platform-system.svc:8222"
+    gatewayName: "etalbaas-gateway"
+    gatewayNamespace: "platform-system"
+    cdcImage: "ghcr.io/kou-etal/etalbaas-cdc-pod:v0.1.0"
+    natsSidecarImage: "ghcr.io/kou-etal/etalbaas-nats-sidecar:v0.1.0"
+    postgrestImage: "postgrest/postgrest:v12.2.0"
+    redisImage: "redis:7-alpine"
+    kanikoImage: "gcr.io/kaniko-project/executor:v1.23.2"
+    buildTimeoutMinutes: 15
+    dispatcherImage: "ghcr.io/kou-etal/etalbaas-gpu-dispatcher:v0.1.0"
+    postgresMetaImage: "supabase/postgres-meta:v0.91.0"
+    gotrueImage: "supabase/gotrue:v2.164.0"
+    sandboxRuntimeClass: "gvisor"
+    maxTotalProjects: 50
+    maxConcurrentBuilds: 2
+    freePlanQuota:
+      cpu: "2"
+      memory: "4Gi"
+      pods: 20
+
+# ─── GPU Configuration ────────────────────────────────────────────────────────
+gpu:
+  enabled: false
+  defaultProvider: "runpod"
+  providers:
+    runpod:
+      enabled: false
+      apiKeySecret: "runpod-creds"
+    selfManaged:
+      enabled: false
+      nodeSelector:
+        gpu: "true"
+      runtimeClass: "nvidia"
+      resourceLimit: "1"
+
+# ─── Dashboard ───────────────────────────────────────────────────────────────
+dashboard:
+  enabled: true
+  image:
+    repository: ""
+    tag: "v0.1.0"
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+# ─── Gateway Infrastructure ──────────────────────────────────────────────────
+gateway:
+  enabled: true
+  gatewayClassName: "envoy-gateway"
+  controllerName: "gateway.envoyproxy.io/gatewayclass-controller"
+  listeners:
+    http:
+      port: 80
+    https:
+      port: 443
+    postgres:
+      port: 5432
+
+# ─── Rate Limiting ──────────────────────────────────────────────────────────
+rateLimit:
+  enabled: true
+  # Per-client local rate limit (no external Redis dependency)
+  requestsPerMinute: 100
+
+# ─── cert-manager ────────────────────────────────────────────────────────────
+certManager:
+  enabled: true
+  issuer:
+    email: "admin@yourdomain.com"
+    server: "https://acme-v02.api.letsencrypt.org/directory"
+    cloudflare:
+      apiTokenSecretName: "cloudflare-api-token"
+      apiTokenSecretKey: "api-token"
+  certificates:
+    api:
+      enabled: true
+    db:
+      enabled: true
+
+# ─── Meta Database ────────────────────────────────────────────────────────────
+metadb:
+  mode: "internal"
+  internal:
+    instances: 2
+    storage: 20Gi
+    storageClass: ""
+    resources:
+      requests:
+        cpu: 500m
+        memory: 512Mi
+      limits:
+        cpu: "1"
+        memory: 1Gi
+    backup:
+      enabled: false
+      endpoint: ""
+      region: ""
+      bucket: "etalbaas-backups"
+      credentialsSecret: "r2-backup-creds"
+      schedule: "0 2 * * *"
+      retentionDays: 30
+    pooler:
+      enabled: true
+      instances: 2
+      poolMode: "transaction"
+  external:
+    host: ""
+    port: 5432
+    database: "etalbaas_meta"
+    credentialsSecret: ""
+  migration:
+    enabled: true
+    image: "migrate/migrate:v4.16.2"
+
+# ─── GoTrue (Dev Auth) ──────────────────────────────────────────────────────
+gotrue:
+  enabled: true
+  image:
+    repository: "supabase/gotrue"
+    tag: "v2.164.0"
+  replicaCount: 1
+  externalUrl: "https://auth.yourdomain.com"
+  siteUrl: "https://dashboard.yourdomain.com"
+  jwt:
+    exp: 3600
+    useAsymmetric: true
+  disableSignup: false
+  email:
+    enabled: true
+    autoconfirm: true
+  github:
+    enabled: false
+    clientId: ""
+    redirectUri: ""
+  google:
+    enabled: false
+    clientId: ""
+    redirectUri: ""
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+# ─── Auth / JWT ──────────────────────────────────────────────────────────────
+auth:
+  jwt:
+    jwksUri: "http://gotrue-dev.platform-system.svc:9999/.well-known/jwks.json"
+    issuer: ""
+    audiences: []
+
+# ─── Observability ───────────────────────────────────────────────────────────
+observability:
+  serviceMonitor:
+    enabled: true
+    interval: "15s"
+  alerting:
+    enabled: true
+    discord:
+      webhookSecretName: "discord-webhook"
+
+# ─── Secrets ─────────────────────────────────────────────────────────────────
+secrets:
+  # SealedSecret/Secret containing: JWT_SECRET, DATABASE_URL, S3_ACCESS_KEY, S3_SECRET_KEY
+  platformSecretName: "platform-secrets"

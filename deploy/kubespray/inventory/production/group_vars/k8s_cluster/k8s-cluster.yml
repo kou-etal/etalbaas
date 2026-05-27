@@ -1,0 +1,65 @@
+---
+# EtalBaaS - Kubernetes cluster configuration
+
+# Kubernetes version (pinned for reproducibility)
+kube_version: v1.30.4
+
+# Container runtime
+container_manager: containerd
+
+# CNI: Cilium with WireGuard transparent encryption
+kube_network_plugin: cilium
+cilium_version: "1.16.4"
+cilium_encryption_enabled: true
+cilium_encryption_type: wireguard
+cilium_hubble_enabled: true
+cilium_hubble_relay_enabled: true
+
+# kube-vip: Control Plane VIP + Service LoadBalancer (ARP mode)
+# Requires L2 network (same subnet). See README for provider compatibility.
+kube_vip_enabled: true
+kube_vip_controlplane_enabled: true
+kube_vip_address: "203.0.113.100"  # UPDATE: Virtual IP for the cluster
+kube_vip_services_enabled: true
+kube_vip_arp_enabled: true
+
+# Local Path Provisioner (NVMe SSD storage for PVCs)
+local_path_provisioner_enabled: true
+local_path_provisioner_is_default_storageclass: true
+
+# etcd encryption at rest (AES-GCM)
+kube_encrypt_secret_data: true
+
+# Kubernetes audit logging
+kubernetes_audit: true
+audit_log_maxage: 30
+audit_log_maxbackup: 10
+audit_log_maxsize: 100
+
+# Pod Security Standards (baseline enforcement)
+kube_pod_security_use_default: true
+
+# Node-03 taint (etcd voter only, no workloads)
+node_taints:
+  node-03:
+    - "node-role.kubernetes.io/control-plane-only=:NoSchedule"
+
+# Additional API server SANs (for external kubectl access)
+supplementary_addresses_in_ssl_keys:
+  - "203.0.113.100"  # kube-vip VIP
+
+# kubelet resource reservation (prevent system OOM)
+kubelet_system_reserved: true
+kubelet_system_reserved_cpu: 100m
+kubelet_system_reserved_memory: 256Mi
+kubelet_system_reserved_ephemeral_storage: 1Gi
+
+# Eviction thresholds
+kubelet_eviction_hard:
+  memory.available: "100Mi"
+  nodefs.available: "10%"
+  imagefs.available: "15%"
+
+# Firewall: nftables with additional ports for platform services
+# kubespray manages inter-node ports (etcd, kubelet, Cilium) automatically.
+nftables_enabled: true

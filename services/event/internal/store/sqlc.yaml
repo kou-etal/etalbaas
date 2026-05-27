@@ -1,0 +1,52 @@
+version: "2"
+sql:
+  - engine: "postgresql"
+    queries: "query.sql"
+    schema: "../../../../deploy/migrations/meta"
+    gen:
+      go:
+        package: "store"
+        out: "."
+        sql_package: "pgx/v5"
+        emit_interface: true
+        overrides:
+          - db_type: "uuid"
+            go_type:
+              import: "github.com/google/uuid"
+              type: "UUID"
+          - db_type: "timestamptz"
+            go_type:
+              import: "time"
+              type: "Time"
+          - db_type: "timestamptz"
+            nullable: true
+            go_type:
+              import: "github.com/jackc/pgx/v5/pgtype"
+              type: "Timestamptz"
+          - db_type: "text"
+            nullable: true
+            go_type:
+              import: ""
+              type: "string"
+              pointer: true
+          - db_type: "pg_catalog.int4"
+            nullable: true
+            go_type:
+              import: ""
+              type: "int32"
+              pointer: true
+          - db_type: "pg_catalog.int8"
+            nullable: true
+            go_type:
+              import: ""
+              type: "int64"
+              pointer: true
+          - db_type: "jsonb"
+            go_type:
+              import: ""
+              type: "[]byte"
+          - db_type: "jsonb"
+            nullable: true
+            go_type:
+              import: ""
+              type: "[]byte"
