@@ -2,21 +2,52 @@ package build
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 )
+
+// validPyPkgRe matches PyPI package names with optional version specifiers (PEP 508 simplified).
+var validPyPkgRe = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9._-]*[a-zA-Z0-9])?(\[([a-zA-Z0-9._-]+,?)+\])?(([=!<>~]=?|===?)[a-zA-Z0-9.*]+)?$`)
+
+// validNpmPkgRe matches npm package names with optional version/tag specifiers.
+var validNpmPkgRe = regexp.MustCompile(`^(@[a-zA-Z0-9._-]+/)?[a-zA-Z0-9._-]+(@[a-zA-Z0-9._^~>=<|\-]+)?$`)
+
+func validateRequirements(reqs []string, re *regexp.Regexp) error {
+	for _, r := range reqs {
+		if !re.MatchString(r) {
+			return fmt.Errorf("invalid package name: %s", r)
+		}
+	}
+	return nil
+}
 
 // GenerateDockerfile generates a Dockerfile for the given runtime preset and requirements.
 func GenerateDockerfile(preset string, requirements []string, customDockerfile string) (string, error) {
 	switch preset {
 	case "python-3.11":
+		if err := validateRequirements(requirements, validPyPkgRe); err != nil {
+			return "", err
+		}
 		return pythonDockerfile("3.11", requirements, false), nil
 	case "python-3.11-ml":
+		if err := validateRequirements(requirements, validPyPkgRe); err != nil {
+			return "", err
+		}
 		return pythonDockerfile("3.11", requirements, true), nil
 	case "python-3.12":
+		if err := validateRequirements(requirements, validPyPkgRe); err != nil {
+			return "", err
+		}
 		return pythonDockerfile("3.12", requirements, false), nil
 	case "node-20":
+		if err := validateRequirements(requirements, validNpmPkgRe); err != nil {
+			return "", err
+		}
 		return nodeDockerfile("20", requirements), nil
 	case "node-22":
+		if err := validateRequirements(requirements, validNpmPkgRe); err != nil {
+			return "", err
+		}
 		return nodeDockerfile("22", requirements), nil
 	case "go-1.22":
 		return goDockerfile("1.22"), nil
@@ -89,6 +120,49 @@ func nodeDockerfile(version string, requirements []string) string {
 
 	return b.String()
 }
+
+// NodeRuntimeWrapper is a minimal HTTP server that imports the user's handler
+// and serves it on port 8080. Supports ESM default exports.
+// Added to the source ConfigMap as index.js when not provided by the user.
+const NodeRuntimeWrapper = `import { createServer } from 'node:http';
+import { readdir } from 'node:fs/promises';
+
+async function findHandler() {
+  const files = await readdir('.');
+  const candidates = ['handler.mjs','handler.js','main.mjs','main.js','index.mjs'];
+  for (const c of candidates) {
+    if (files.includes(c) && c !== 'index.js') {
+      const mod = await import('./' + c);
+      return mod.default || mod.handler || mod;
+    }
+  }
+  throw new Error('No handler file found. Expected handler.js or main.js');
+}
+
+const handler = await findHandler();
+const PORT = process.env.PORT || 8080;
+
+createServer(async (req, res) => {
+  try {
+    let body = '';
+    for await (const chunk of req) body += chunk;
+    const request = new Request('http://localhost' + req.url, {
+      method: req.method,
+      headers: req.headers,
+      body: ['GET','HEAD'].includes(req.method) ? undefined : body,
+    });
+    const response = await handler(request);
+    const text = await response.text();
+    const headers = {};
+    response.headers.forEach((v, k) => { headers[k] = v; });
+    res.writeHead(response.status || 200, headers);
+    res.end(text);
+  } catch (err) {
+    res.writeHead(500, {'Content-Type':'application/json'});
+    res.end(JSON.stringify({error: err.message}));
+  }
+}).listen(PORT, () => console.log('Function listening on port ' + PORT));
+`
 
 func goDockerfile(version string) string {
 	var b strings.Builder

@@ -3,6 +3,8 @@ package build
 import (
 	"crypto/sha256"
 	"fmt"
+	"regexp"
+	"strings"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -13,12 +15,26 @@ import (
 	"github.com/kou-etal/etalbaas/operator/internal/config"
 )
 
+// validGitPathRe allows only safe characters in git subdirectory paths.
+var validGitPathRe = regexp.MustCompile(`^[a-zA-Z0-9._/\-]+$`)
+
+// validateGitPath rejects paths that could lead to shell injection.
+func validateGitPath(p string) error {
+	if strings.Contains(p, "..") {
+		return fmt.Errorf("git path must not contain '..': %s", p)
+	}
+	if !validGitPathRe.MatchString(p) {
+		return fmt.Errorf("git path contains invalid characters: %s", p)
+	}
+	return nil
+}
+
 // KanikoBuildJob creates a Kaniko Job spec for building a Function's container image.
 // The Job is created in the platform-system namespace for security isolation.
 func KanikoBuildJob(
 	fn *etalbaasv1alpha1.Function,
 	cfg config.OperatorConfig,
-) *batchv1.Job {
+) (*batchv1.Job, error) {
 	projectID := fn.Spec.ProjectRef.Name
 	funcName := fn.Name
 	generation := fn.Generation
@@ -28,7 +44,6 @@ func KanikoBuildJob(
 
 	var backoffLimit int32 = 1
 	activeDeadlineSeconds := int64(cfg.BuildTimeout.Seconds())
-	runtimeClassName := "gvisor"
 
 	labels := map[string]string{
 		"etalbaas.io/project-id":    projectID,
@@ -39,7 +54,10 @@ func KanikoBuildJob(
 	}
 
 	// Build init container based on source type
-	initContainers := buildInitContainers(fn)
+	initContainers, err := buildInitContainers(fn)
+	if err != nil {
+		return nil, fmt.Errorf("build init containers: %w", err)
+	}
 
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
@@ -55,7 +73,6 @@ func KanikoBuildJob(
 					Labels: labels,
 				},
 				Spec: corev1.PodSpec{
-					RuntimeClassName:             &runtimeClassName,
 					RestartPolicy:                corev1.RestartPolicyNever,
 					AutomountServiceAccountToken: boolPtr(false),
 					SecurityContext: &corev1.PodSecurityContext{
@@ -66,17 +83,10 @@ func KanikoBuildJob(
 					InitContainers: initContainers,
 					Containers: []corev1.Container{
 						{
-							Name:  "kaniko",
-							Image: cfg.KanikoImage,
-							Args: []string{
-								"--dockerfile=/workspace/Dockerfile",
-								"--context=/workspace/source",
-								"--destination=" + destination,
-								"--cache=true",
-								"--cache-repo=" + cfg.RegistryEndpoint + "/cache",
-								"--insecure",
-								"--skip-tls-verify",
-							},
+							Name:            "kaniko",
+							Image:           cfg.KanikoImage,
+							ImagePullPolicy: corev1.PullIfNotPresent,
+							Args: kanikoArgs(destination, cfg),
 							VolumeMounts: []corev1.VolumeMount{
 								{Name: "workspace", MountPath: "/workspace"},
 							},
@@ -98,7 +108,13 @@ func KanikoBuildJob(
 		},
 	}
 
-	return job
+	// Set RuntimeClassName only when configured (e.g., "gvisor" in production).
+	if cfg.SandboxRuntimeClass != "" {
+		rc := cfg.SandboxRuntimeClass
+		job.Spec.Template.Spec.RuntimeClassName = &rc
+	}
+
+	return job, nil
 }
 
 // BuildDockerfileConfigMap creates a ConfigMap containing the generated Dockerfile.
@@ -187,6 +203,8 @@ func SourceConfigMapName(projectID, funcName string) string {
 }
 
 // BuildSourceConfigMap creates a ConfigMap containing inline source files.
+// For Node.js presets, automatically injects index.js (runtime wrapper) and
+// package.json if not provided by the user.
 func BuildSourceConfigMap(
 	fn *etalbaasv1alpha1.Function,
 	cfg config.OperatorConfig,
@@ -198,6 +216,18 @@ func BuildSourceConfigMap(
 	if fn.Spec.Source.Inline != nil {
 		for k, v := range fn.Spec.Source.Inline.Files {
 			data[k] = v
+		}
+	}
+
+	// Inject Node.js runtime wrapper if this is a Node preset and
+	// the user hasn't provided their own index.js or package.json.
+	preset := fn.Spec.Runtime.Preset
+	if isNodePreset(preset) {
+		if _, ok := data["index.js"]; !ok {
+			data["index.js"] = NodeRuntimeWrapper
+		}
+		if _, ok := data["package.json"]; !ok {
+			data["package.json"] = `{"type":"module"}`
 		}
 	}
 
@@ -236,14 +266,14 @@ func initContainerSecurityContext() *corev1.SecurityContext {
 	}
 }
 
-func buildInitContainers(fn *etalbaasv1alpha1.Function) []corev1.Container {
+func buildInitContainers(fn *etalbaasv1alpha1.Function) ([]corev1.Container, error) {
 	source := fn.Spec.Source
 	sc := initContainerSecurityContext()
 
 	switch source.Type {
 	case "git":
 		if source.Git == nil {
-			return []corev1.Container{dockerfileCopyInitContainer()}
+			return []corev1.Container{dockerfileCopyInitContainer()}, nil
 		}
 		git := source.Git
 		ref := "HEAD"
@@ -256,6 +286,9 @@ func buildInitContainers(fn *etalbaasv1alpha1.Function) []corev1.Container {
 		}
 		copyCmd := "cp -r /tmp/repo/. /workspace/source/"
 		if git.Path != "" && git.Path != "/" {
+			if err := validateGitPath(git.Path); err != nil {
+				return nil, err
+			}
 			copyCmd = fmt.Sprintf("cp -r /tmp/repo/%s/. /workspace/source/", git.Path)
 		}
 		return []corev1.Container{
@@ -279,7 +312,7 @@ func buildInitContainers(fn *etalbaasv1alpha1.Function) []corev1.Container {
 				},
 			},
 			dockerfileCopyInitContainer(),
-		}
+		}, nil
 	case "inline":
 		return []corev1.Container{
 			{
@@ -294,7 +327,7 @@ func buildInitContainers(fn *etalbaasv1alpha1.Function) []corev1.Container {
 				},
 			},
 			dockerfileCopyInitContainer(),
-		}
+		}, nil
 	case "zip":
 		// TODO: zip source requires downloading from object storage.
 		// Not yet implemented; the build will fail with a clear error.
@@ -310,9 +343,9 @@ func buildInitContainers(fn *etalbaasv1alpha1.Function) []corev1.Container {
 				},
 			},
 			dockerfileCopyInitContainer(),
-		}
+		}, nil
 	default:
-		return []corev1.Container{dockerfileCopyInitContainer()}
+		return []corev1.Container{dockerfileCopyInitContainer()}, nil
 	}
 }
 
@@ -336,6 +369,26 @@ func int64Ptr(i int64) *int64 {
 
 func boolPtr(b bool) *bool {
 	return &b
+}
+
+func isNodePreset(preset string) bool {
+	return strings.HasPrefix(preset, "node-")
+}
+
+// kanikoArgs builds the Kaniko executor arguments.
+// --insecure and --skip-tls-verify are only added when RegistryInsecure is true.
+func kanikoArgs(destination string, cfg config.OperatorConfig) []string {
+	args := []string{
+		"--dockerfile=/workspace/Dockerfile",
+		"--context=/workspace/source",
+		"--destination=" + destination,
+		"--cache=true",
+		"--cache-repo=" + cfg.RegistryEndpoint + "/cache",
+	}
+	if cfg.RegistryInsecure {
+		args = append(args, "--insecure", "--skip-tls-verify")
+	}
+	return args
 }
 
 func shortSha(input string) string {
