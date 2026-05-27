@@ -91,3 +91,7 @@ RETURNING *;
 DELETE FROM secrets_metadata
 WHERE id = $1 AND project_id = $2
 RETURNING *;
+
+-- name: CountActiveProjectsByTenantID :one
+SELECT COUNT(*) FROM projects
+WHERE tenant_id = $1 AND status != 'deleted';

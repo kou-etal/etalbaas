@@ -24,6 +24,7 @@ import (
 var testUserID = uuid.MustParse("550e8400-e29b-41d4-a716-446655440000")
 
 type mockQuerier struct {
+	countActiveProjectsByTenantIDFn func(ctx context.Context, tenantID uuid.UUID) (int64, error)
 	createProjectFn              func(ctx context.Context, arg store.CreateProjectParams) (store.Project, error)
 	getProjectByIDAndTenantIDFn  func(ctx context.Context, arg store.GetProjectByIDAndTenantIDParams) (store.Project, error)
 	listProjectsByTenantIDFn     func(ctx context.Context, arg store.ListProjectsByTenantIDParams) ([]store.Project, error)
@@ -37,6 +38,13 @@ type mockQuerier struct {
 	listSecretsByProjectIDFn     func(ctx context.Context, arg store.ListSecretsByProjectIDParams) ([]store.SecretsMetadatum, error)
 	updateSecretMetadataUpdatedAtFn func(ctx context.Context, arg store.UpdateSecretMetadataUpdatedAtParams) (store.SecretsMetadatum, error)
 	deleteSecretMetadataFn       func(ctx context.Context, arg store.DeleteSecretMetadataParams) (store.SecretsMetadatum, error)
+}
+
+func (m *mockQuerier) CountActiveProjectsByTenantID(ctx context.Context, tenantID uuid.UUID) (int64, error) {
+	if m.countActiveProjectsByTenantIDFn != nil {
+		return m.countActiveProjectsByTenantIDFn(ctx, tenantID)
+	}
+	return 0, nil
 }
 
 func (m *mockQuerier) CreateProject(ctx context.Context, arg store.CreateProjectParams) (store.Project, error) {

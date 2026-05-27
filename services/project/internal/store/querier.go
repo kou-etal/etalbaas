@@ -6,9 +6,12 @@ package store
 
 import (
 	"context"
+
+	"github.com/google/uuid"
 )
 
 type Querier interface {
+	CountActiveProjectsByTenantID(ctx context.Context, tenantID uuid.UUID) (int64, error)
 	CreateApiKey(ctx context.Context, arg CreateApiKeyParams) (ApiKey, error)
 	CreateProject(ctx context.Context, arg CreateProjectParams) (Project, error)
 	CreateSecretMetadata(ctx context.Context, arg CreateSecretMetadataParams) (SecretsMetadatum, error)

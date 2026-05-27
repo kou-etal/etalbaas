@@ -12,6 +12,18 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countActiveProjectsByTenantID = `-- name: CountActiveProjectsByTenantID :one
+SELECT COUNT(*) FROM projects
+WHERE tenant_id = $1 AND status != 'deleted'
+`
+
+func (q *Queries) CountActiveProjectsByTenantID(ctx context.Context, tenantID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countActiveProjectsByTenantID, tenantID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createApiKey = `-- name: CreateApiKey :one
 INSERT INTO api_keys (
     id, project_id, name, key_hash, key_prefix, role, expires_at
@@ -239,9 +251,9 @@ const listApiKeysByProjectID = `-- name: ListApiKeysByProjectID :many
 SELECT id, project_id, name, key_hash, key_prefix, role, expires_at, revoked_at, created_at FROM api_keys
 WHERE project_id = $1
   AND (
-    $2::timestamptz IS NULL
-    OR created_at < $2::timestamptz
-    OR (created_at = $2::timestamptz AND id < $3)
+    $2 IS NULL
+    OR created_at < $2
+    OR (created_at = $2 AND id < $3)
   )
 ORDER BY created_at DESC, id DESC
 LIMIT $4
@@ -249,7 +261,7 @@ LIMIT $4
 
 type ListApiKeysByProjectIDParams struct {
 	ProjectID       string
-	CursorCreatedAt pgtype.Timestamptz
+	CursorCreatedAt interface{}
 	CursorID        pgtype.UUID
 	PageSize        int32
 }
@@ -294,9 +306,9 @@ SELECT id, tenant_id, display_name, description, status, postgres_enabled, postg
 WHERE tenant_id = $1
   AND status != 'deleted'
   AND (
-    $2::timestamptz IS NULL
-    OR created_at < $2::timestamptz
-    OR (created_at = $2::timestamptz AND id < $3)
+    $2 IS NULL
+    OR created_at < $2
+    OR (created_at = $2 AND id < $3)
   )
 ORDER BY created_at DESC, id DESC
 LIMIT $4
@@ -304,7 +316,7 @@ LIMIT $4
 
 type ListProjectsByTenantIDParams struct {
 	TenantID        uuid.UUID
-	CursorCreatedAt pgtype.Timestamptz
+	CursorCreatedAt interface{}
 	CursorID        *string
 	PageSize        int32
 }
@@ -350,9 +362,9 @@ const listSecretsByProjectID = `-- name: ListSecretsByProjectID :many
 SELECT id, project_id, name, description, created_at, updated_at FROM secrets_metadata
 WHERE project_id = $1
   AND (
-    $2::timestamptz IS NULL
-    OR created_at < $2::timestamptz
-    OR (created_at = $2::timestamptz AND id < $3)
+    $2 IS NULL
+    OR created_at < $2
+    OR (created_at = $2 AND id < $3)
   )
 ORDER BY created_at DESC, id DESC
 LIMIT $4
@@ -360,7 +372,7 @@ LIMIT $4
 
 type ListSecretsByProjectIDParams struct {
 	ProjectID       string
-	CursorCreatedAt pgtype.Timestamptz
+	CursorCreatedAt interface{}
 	CursorID        pgtype.UUID
 	PageSize        int32
 }

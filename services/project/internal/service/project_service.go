@@ -21,14 +21,15 @@ import (
 )
 
 const (
-	maxDisplayNameLen    = 100
-	maxDescriptionLen    = 500
-	maxApiKeyNameLen     = 63
-	projectIDLen         = 8
-	apiKeyRawBytes       = 32
-	apiKeyPrefixLen      = 8
-	defaultExpiresInDays = 90
-	noExpiryYear         = 9999
+	maxDisplayNameLen       = 100
+	maxDescriptionLen       = 500
+	maxApiKeyNameLen        = 63
+	projectIDLen            = 8
+	apiKeyRawBytes          = 32
+	apiKeyPrefixLen         = 8
+	defaultExpiresInDays    = 90
+	noExpiryYear            = 9999
+	maxProjectsPerTenant    = 2 // Free plan limit
 )
 
 var allowedExtensions = map[string]bool{
@@ -61,6 +62,7 @@ type CreateProjectParams struct {
 }
 
 func (s *ProjectService) CreateProject(ctx context.Context, p CreateProjectParams) (store.Project, error) {
+	// Validate inputs first (no DB access needed)
 	if err := validateDisplayName(p.DisplayName); err != nil {
 		return store.Project{}, err
 	}
@@ -77,6 +79,15 @@ func (s *ProjectService) CreateProject(ctx context.Context, p CreateProjectParam
 	}
 	if p.PostgrestEnabled && !p.PostgresEnabled {
 		return store.Project{}, apperror.New(apperror.CodeInvalidArgument, "postgrest requires postgres to be enabled")
+	}
+
+	// Enforce per-tenant project count limit
+	count, err := s.q.CountActiveProjectsByTenantID(ctx, p.TenantID)
+	if err != nil {
+		return store.Project{}, wrapDBError(err, "count projects")
+	}
+	if count >= maxProjectsPerTenant {
+		return store.Project{}, apperror.New(apperror.CodeResourceExhausted, "project limit reached for current plan")
 	}
 
 	projectID, err := generateProjectID()
@@ -137,7 +148,51 @@ func (s *ProjectService) GetProject(ctx context.Context, tenantID uuid.UUID, pro
 	if err != nil {
 		return store.Project{}, wrapDBError(err, "get project")
 	}
+
+	// Lazy-sync: if metaDB status is still pending/provisioning, check the
+	// K8s CR phase and update metaDB to match.
+	if s.crdMgr != nil && (row.Status == "pending" || row.Status == "provisioning") {
+		row = s.syncStatusFromCR(ctx, row, tenantID)
+	}
+
 	return row, nil
+}
+
+// syncStatusFromCR reads the K8s Project CR phase and updates metaDB when
+// the CR has reached a terminal state (Ready / Failed).
+func (s *ProjectService) syncStatusFromCR(ctx context.Context, row store.Project, tenantID uuid.UUID) store.Project {
+	phase, err := s.crdMgr.GetPhase(ctx, row.ID)
+	if err != nil {
+		slog.WarnContext(ctx, "failed to get CR phase for status sync", "project_id", row.ID, "error", err)
+		return row
+	}
+
+	var newStatus string
+	switch phase {
+	case "Ready":
+		newStatus = "ready"
+	case "Failed":
+		newStatus = "failed"
+	case "Provisioning":
+		if row.Status == "pending" {
+			newStatus = "provisioning"
+		}
+	}
+
+	if newStatus == "" || newStatus == row.Status {
+		return row
+	}
+
+	updated, err := s.q.UpdateProjectStatus(ctx, store.UpdateProjectStatusParams{
+		ID:       row.ID,
+		TenantID: tenantID,
+		Status:   newStatus,
+	})
+	if err != nil {
+		slog.WarnContext(ctx, "failed to sync project status from CR", "project_id", row.ID, "new_status", newStatus, "error", err)
+		return row
+	}
+	return updated
 }
 
 func (s *ProjectService) ListProjects(ctx context.Context, tenantID uuid.UUID, limit int32, cursorCreatedAt *time.Time, cursorID *string) ([]store.Project, error) {
@@ -204,8 +259,8 @@ func (s *ProjectService) PauseProject(ctx context.Context, tenantID uuid.UUID, p
 	if status == "paused" {
 		return store.Project{}, apperror.New(apperror.CodeFailedPrecondition, "project is already paused")
 	}
-	if status != "ready" {
-		return store.Project{}, apperror.New(apperror.CodeFailedPrecondition, "project must be in ready state to pause")
+	if status == "deleted" || status == "deleting" || status == "failed" {
+		return store.Project{}, apperror.New(apperror.CodeFailedPrecondition, "project cannot be paused in current state")
 	}
 
 	row, err := s.q.UpdateProjectStatus(ctx, store.UpdateProjectStatusParams{
