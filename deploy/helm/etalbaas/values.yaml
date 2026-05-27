@@ -25,7 +25,7 @@ services:
     enabled: true
     image:
       repository: ""
-      tag: "latest"
+      tag: "v0.1.0"
     replicaCount: null
     resources: {}
 
@@ -33,7 +33,7 @@ services:
     enabled: true
     image:
       repository: ""
-      tag: "latest"
+      tag: "v0.1.0"
     replicaCount: null
     resources: {}
 
@@ -41,7 +41,7 @@ services:
     enabled: true
     image:
       repository: ""
-      tag: "latest"
+      tag: "v0.1.0"
     replicaCount: null
     resources: {}
     k8sEnabled: true
@@ -50,7 +50,7 @@ services:
     enabled: true
     image:
       repository: ""
-      tag: "latest"
+      tag: "v0.1.0"
     replicaCount: null
     resources: {}
 
@@ -58,9 +58,10 @@ services:
     enabled: true
     image:
       repository: ""
-      tag: "latest"
+      tag: "v0.1.0"
     replicaCount: null
     resources: {}
+    natsUrl: "nats://nats.etalbaas.svc:4222"
     s3:
       endpoint: ""
       bucket: "etalbaas-storage"
@@ -72,7 +73,7 @@ operator:
   enabled: true
   image:
     repository: ""
-    tag: "latest"
+    tag: "v0.1.0"
   replicaCount: 1
   leaderElection: true
   resources:
@@ -84,17 +85,23 @@ operator:
       memory: 256Mi
   config:
     registryEndpoint: "zot.platform-system.svc:5000"
+    registryInsecure: false  # Set to true for local/dev HTTP registries
     natsEndpoint: "nats.platform-system.svc:4222"
-    natsMonitoringEndpoint: "nats.platform-system.svc:8222"
+    natsMonitoringEndpoint: "nats-headless.platform-system.svc:8222"
     gatewayName: "etalbaas-gateway"
     gatewayNamespace: "platform-system"
-    cdcImage: "ghcr.io/kou-etal/etalbaas-cdc-pod:latest"
-    natsSidecarImage: "ghcr.io/kou-etal/etalbaas-nats-sidecar:latest"
+    cdcImage: "ghcr.io/kou-etal/etalbaas-cdc-pod:v0.1.0"
+    natsSidecarImage: "ghcr.io/kou-etal/etalbaas-nats-sidecar:v0.1.0"
     postgrestImage: "postgrest/postgrest:v12.2.0"
     redisImage: "redis:7-alpine"
-    kanikoImage: "gcr.io/kaniko-project/executor:latest"
+    kanikoImage: "gcr.io/kaniko-project/executor:v1.23.2"
     buildTimeoutMinutes: 15
-    dispatcherImage: "ghcr.io/kou-etal/etalbaas-gpu-dispatcher:latest"
+    dispatcherImage: "ghcr.io/kou-etal/etalbaas-gpu-dispatcher:v0.1.0"
+    postgresMetaImage: "supabase/postgres-meta:v0.91.0"
+    gotrueImage: "supabase/gotrue:v2.164.0"
+    sandboxRuntimeClass: "gvisor"
+    maxTotalProjects: 50
+    maxConcurrentBuilds: 2
     freePlanQuota:
       cpu: "2"
       memory: "4Gi"
@@ -120,7 +127,7 @@ dashboard:
   enabled: true
   image:
     repository: ""
-    tag: "latest"
+    tag: "v0.1.0"
   replicaCount: 1
   resources:
     requests:
@@ -142,6 +149,12 @@ gateway:
       port: 443
     postgres:
       port: 5432
+
+# ─── Rate Limiting ──────────────────────────────────────────────────────────
+rateLimit:
+  enabled: true
+  # Per-client local rate limit (no external Redis dependency)
+  requestsPerMinute: 100
 
 # ─── cert-manager ────────────────────────────────────────────────────────────
 certManager:
@@ -231,6 +244,16 @@ auth:
     jwksUri: "http://gotrue-dev.platform-system.svc:9999/.well-known/jwks.json"
     issuer: ""
     audiences: []
+
+# ─── Observability ───────────────────────────────────────────────────────────
+observability:
+  serviceMonitor:
+    enabled: true
+    interval: "15s"
+  alerting:
+    enabled: true
+    discord:
+      webhookSecretName: "discord-webhook"
 
 # ─── Secrets ─────────────────────────────────────────────────────────────────
 secrets:
