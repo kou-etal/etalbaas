@@ -2,6 +2,8 @@ package resources
 
 import (
 	"log/slog"
+	"strings"
+	"unicode"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -88,12 +90,12 @@ func buildFunctionPodSpec(fn *etalbaasv1alpha1.Function, imageRef string, cfg co
 		},
 	}
 
-	// Inject NATS sidecar for DatabaseChange triggers.
-	if HasDatabaseChangeTrigger(fn) && cfg.NATSSidecarImage == "" {
+	// Inject NATS sidecar for event-driven triggers (DatabaseChange or ObjectStorage).
+	if HasEventTrigger(fn) && cfg.NATSSidecarImage == "" {
 		slog.Warn("NATSSidecarImage not configured, skipping sidecar injection",
 			"function", fn.Name, "namespace", fn.Namespace)
 	}
-	if HasDatabaseChangeTrigger(fn) && cfg.NATSSidecarImage != "" {
+	if HasEventTrigger(fn) && cfg.NATSSidecarImage != "" {
 		projectID := fn.Spec.ProjectRef.Name
 		var sidecarUID int64 = 65532
 		sidecar := corev1.Container{
@@ -148,15 +150,17 @@ func buildFunctionPodSpec(fn *etalbaasv1alpha1.Function, imageRef string, cfg co
 		podSpec.Containers = append(podSpec.Containers, sidecar)
 	}
 
-	// RuntimeClass: gVisor by default, nvidia for self-managed GPU
+	// RuntimeClass: use config default, override from Function CR, nvidia for self-managed GPU
 	if isGPUSelfManaged(fn) {
 		applySelfManagedGPU(&podSpec, cfg)
 	} else {
-		gvisorRuntime := "gvisor"
+		rc := cfg.SandboxRuntimeClass // may be empty (e.g., dev/kind environments)
 		if fn.Spec.Sandbox != nil && fn.Spec.Sandbox.RuntimeClass != "" {
-			gvisorRuntime = fn.Spec.Sandbox.RuntimeClass
+			rc = fn.Spec.Sandbox.RuntimeClass
 		}
-		podSpec.RuntimeClassName = &gvisorRuntime
+		if rc != "" {
+			podSpec.RuntimeClassName = &rc
+		}
 	}
 
 	return podSpec
@@ -259,18 +263,34 @@ func defaultResourcesByKind(kind string) corev1.ResourceRequirements {
 	}
 }
 
+// blockedEnvVars contains system environment variable names that users must not
+// override. Overriding these could break container behaviour or escalate privileges.
+var blockedEnvVars = map[string]bool{
+	"PATH":            true,
+	"HOME":            true,
+	"USER":            true,
+	"SHELL":           true,
+	"LD_PRELOAD":      true,
+	"LD_LIBRARY_PATH": true,
+	"HOSTNAME":        true,
+}
+
 func resolveEnvVars(fn *etalbaasv1alpha1.Function) []corev1.EnvVar {
 	var envVars []corev1.EnvVar
 	for _, e := range fn.Spec.Env {
+		if blockedEnvVars[strings.ToUpper(e.Name)] {
+			slog.Warn("blocked env var override", "name", e.Name, "function", fn.Name)
+			continue
+		}
 		if e.SecretName != "" {
 			envVars = append(envVars, corev1.EnvVar{
 				Name: e.Name,
 				ValueFrom: &corev1.EnvVarSource{
 					SecretKeyRef: &corev1.SecretKeySelector{
 						LocalObjectReference: corev1.LocalObjectReference{
-							Name: e.SecretName,
+							Name: toK8sSecretName(e.SecretName),
 						},
-						Key: "value",
+						Key: e.SecretName,
 					},
 				},
 			})
@@ -282,6 +302,22 @@ func resolveEnvVars(fn *etalbaasv1alpha1.Function) []corev1.EnvVar {
 		}
 	}
 	return envVars
+}
+
+// toK8sSecretName converts a user-facing secret name to a DNS-1123 compatible
+// k8s Secret name.  Must match pkg/k8s.ToK8sSecretName.
+// Example: "GEMINI_API_KEY" → "gemini-api-key"
+func toK8sSecretName(name string) string {
+	lower := strings.ToLower(name)
+	var b strings.Builder
+	for _, r := range lower {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			b.WriteRune(r)
+		} else {
+			b.WriteByte('-')
+		}
+	}
+	return strings.Trim(b.String(), "-")
 }
 
 func isGPUSelfManaged(fn *etalbaasv1alpha1.Function) bool {
