@@ -247,6 +247,68 @@ func (p *RunPodServerlessProvider) Cancel(ctx context.Context, id JobID) error {
 	return nil
 }
 
+// SubmitSync sends a GPU job to RunPod's /runsync endpoint, which blocks until
+// the job completes (or times out on RunPod's side, typically ~120s).
+// Unlike Submit+Poll, this avoids polling overhead for short-lived jobs.
+// Image validation is skipped because /runsync uses the endpoint's worker image.
+func (p *RunPodServerlessProvider) SubmitSync(ctx context.Context, job GPUJob) (JobStatus, error) {
+	if job.GPUType == "" {
+		return JobStatus{}, fmt.Errorf("gpu job gpu_type must not be empty")
+	}
+
+	endpointID := p.resolveEndpointID(job.ProviderConfig)
+	if endpointID == "" {
+		return JobStatus{}, fmt.Errorf("RunPod serverless requires provider_config.endpoint_id")
+	}
+
+	apiKey, err := p.resolveAPIKey(ctx)
+	if err != nil {
+		return JobStatus{}, fmt.Errorf("resolve RunPod API key: %w", err)
+	}
+
+	input := job.Input
+	if input == nil {
+		input = []byte("{}")
+	}
+
+	body, err := json.Marshal(runpodRunRequest{Input: input})
+	if err != nil {
+		return JobStatus{}, fmt.Errorf("marshal RunPod request: %w", err)
+	}
+
+	reqURL := fmt.Sprintf("%s/%s/runsync", p.baseURL, url.PathEscape(endpointID))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, bytes.NewReader(body))
+	if err != nil {
+		return JobStatus{}, fmt.Errorf("create RunPod request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+
+	resp, err := p.httpClient.Do(req)
+	if err != nil {
+		return JobStatus{}, fmt.Errorf("RunPod /runsync request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseBodySize))
+	if resp.StatusCode != http.StatusOK {
+		return JobStatus{}, fmt.Errorf("RunPod /runsync returned %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var result runpodStatusResponse
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return JobStatus{}, fmt.Errorf("unmarshal RunPod runsync response: %w", err)
+	}
+
+	return JobStatus{
+		State:           mapRunPodState(result.Status),
+		DelayTimeMs:     result.DelayTime,
+		ExecutionTimeMs: result.ExecutionTime,
+		Output:          result.Output,
+		Error:           result.Error,
+	}, nil
+}
+
 func (p *RunPodServerlessProvider) EstimateCost(_ GPUJob) (Cost, error) {
 	// Phase 1: no billing, return zero cost.
 	return Cost{Amount: 0, Currency: "USD", Unit: "per-second"}, nil
