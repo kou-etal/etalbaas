@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -45,12 +46,15 @@ func (c *Consumer) Run(ctx context.Context) error {
 		}
 
 		// Fetch one message at a time with a short timeout so we can check context.
-		msgs, err := c.sub.Fetch(1, nats.MaxWait(5*time.Second), nats.Context(ctx))
+		// Note: nats.MaxWait and nats.Context cannot be used together.
+		fetchCtx, fetchCancel := context.WithTimeout(ctx, 5*time.Second)
+		msgs, err := c.sub.Fetch(1, nats.Context(fetchCtx))
+		fetchCancel()
 		if err != nil {
 			if ctx.Err() != nil {
 				return nil
 			}
-			if err == nats.ErrTimeout {
+			if err == nats.ErrTimeout || err == context.DeadlineExceeded {
 				continue
 			}
 			return fmt.Errorf("fetch message: %w", err)
@@ -82,7 +86,7 @@ func (c *Consumer) processMessage(ctx context.Context, msg *nats.Msg) error {
 		if eventID != "" {
 			req.Header.Set("X-Event-Id", eventID)
 		}
-		req.Header.Set("X-Event-Type", "DatabaseChange")
+		req.Header.Set("X-Event-Type", eventTypeFromSubject(msg.Subject))
 
 		resp, err := c.httpClient.Do(req)
 		if err != nil {
@@ -91,7 +95,8 @@ func (c *Consumer) processMessage(ctx context.Context, msg *nats.Msg) error {
 			backoff(ctx, attempt)
 			continue
 		}
-		_, _ = io.Copy(io.Discard, resp.Body)
+		// Limit response body read to 1MB to avoid resource exhaustion from misbehaving functions.
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
 		resp.Body.Close()
 
 		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
@@ -116,6 +121,20 @@ func (c *Consumer) processMessage(ctx context.Context, msg *nats.Msg) error {
 		c.logger.Error("failed to nak message", "error", err)
 	}
 	return fmt.Errorf("exhausted retries for event %s: %w", eventID, lastErr)
+}
+
+// eventTypeFromSubject derives the X-Event-Type header value from the NATS
+// message subject.  Subject formats:
+//   - events.database.<op>.project-<id>.<table>  → "DatabaseChange"
+//   - events.storage.<op>.project-<id>.<bucket>  → "StorageEvent"
+//
+// Falls back to "DatabaseChange" for unrecognised subjects.
+func eventTypeFromSubject(subject string) string {
+	parts := strings.SplitN(subject, ".", 3)
+	if len(parts) >= 2 && parts[1] == "storage" {
+		return "StorageEvent"
+	}
+	return "DatabaseChange"
 }
 
 // backoff sleeps for an exponentially increasing duration, respecting context cancellation.
