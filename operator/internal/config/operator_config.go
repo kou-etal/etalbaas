@@ -55,6 +55,34 @@ type OperatorConfig struct {
 
 	// DispatcherImage is the container image for the GPU dispatcher.
 	DispatcherImage string
+
+	// PostgresMetaImage is the container image for supabase/postgres-meta.
+	PostgresMetaImage string
+
+	// MaxTotalProjects is the maximum number of projects across the entire cluster.
+	// When reached, new projects will be set to "Queued" phase and requeued.
+	// 0 means unlimited.
+	MaxTotalProjects int
+
+	// MaxConcurrentBuilds is the maximum number of concurrent Kaniko build jobs
+	// per project. When reached, new builds will be requeued.
+	MaxConcurrentBuilds int
+
+	// RegistryInsecure allows Kaniko to push to an insecure (HTTP) registry.
+	// Set to true for local/dev registries. Defaults to false in production.
+	RegistryInsecure bool
+
+	// SandboxRuntimeClass is the Kubernetes RuntimeClass for sandboxed workloads
+	// (build jobs, function deployments, GPU dispatchers).
+	// Set to "gvisor" in production. When empty, RuntimeClassName is not set on pods.
+	SandboxRuntimeClass string
+
+	// GoTrueImage is the container image for GoTrue auth server.
+	GoTrueImage string
+
+	// JWTSecret is the symmetric JWT secret shared with GoTrue.
+	// Replicated into each project namespace as "project-jwt-secret" for PostgREST.
+	JWTSecret string
 }
 
 // PlanQuota defines resource quotas for a billing plan.
@@ -85,7 +113,12 @@ func DefaultConfig() OperatorConfig {
 			Memory: "4Gi",
 			Pods:   20,
 		},
-		GPU:             gpu.DefaultGPUConfig(),
-		DispatcherImage: "etalbaas/gpu-dispatcher:latest",
+		MaxTotalProjects:    50,
+		MaxConcurrentBuilds: 2,
+		GPU:                 gpu.DefaultGPUConfig(),
+		DispatcherImage:     "etalbaas/gpu-dispatcher:latest",
+		PostgresMetaImage:   "supabase/postgres-meta:v0.91.0",
+		GoTrueImage:         "supabase/gotrue:v2.164.0",
+		SandboxRuntimeClass: "gvisor",
 	}
 }
