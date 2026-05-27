@@ -21,6 +21,10 @@ type Config struct {
 
 	// K8s toggle — when false, uses static pool (no per-project routing).
 	K8sEnabled bool `env:"K8S_ENABLED" envDefault:"true"`
+
+	// NATS JetStream — when empty, storage event publishing is disabled.
+	NATSURL           string `env:"NATS_URL"            envDefault:""`
+	NATSSubjectPrefix string `env:"NATS_SUBJECT_PREFIX" envDefault:"events.storage"`
 }
 
 func NewConfig() (*Config, error) {
