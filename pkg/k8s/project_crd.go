@@ -21,6 +21,9 @@ var projectGVR = schema.GroupVersionResource{
 type ProjectCRDManager interface {
 	CreateOrUpdate(ctx context.Context, params ProjectCRDParams) error
 	Delete(ctx context.Context, projectID string) error
+	// GetPhase returns the CR's status.phase (e.g., "Ready", "Provisioning").
+	// Returns empty string if the CR does not exist or has no phase set.
+	GetPhase(ctx context.Context, projectID string) (string, error)
 }
 
 // ProjectCRDParams holds the parameters needed to build a Project CRD.
@@ -79,6 +82,18 @@ func (m *projectCRDManager) Delete(ctx context.Context, projectID string) error 
 		return fmt.Errorf("delete Project CRD: %w", err)
 	}
 	return nil
+}
+
+func (m *projectCRDManager) GetPhase(ctx context.Context, projectID string) (string, error) {
+	obj, err := m.client.Resource(projectGVR).Namespace(m.namespace).Get(ctx, projectID, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("get Project CRD: %w", err)
+	}
+	phase, _, _ := unstructured.NestedString(obj.Object, "status", "phase")
+	return phase, nil
 }
 
 // buildProjectCRDObject constructs the unstructured Project CRD from params.

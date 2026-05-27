@@ -8,3 +8,4 @@ type NoopProjectCRDManager struct{}
 
 func (NoopProjectCRDManager) CreateOrUpdate(_ context.Context, _ ProjectCRDParams) error { return nil }
 func (NoopProjectCRDManager) Delete(_ context.Context, _ string) error                   { return nil }
+func (NoopProjectCRDManager) GetPhase(_ context.Context, _ string) (string, error)       { return "", nil }
