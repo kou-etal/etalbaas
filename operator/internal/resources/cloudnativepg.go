@@ -2,12 +2,16 @@ package resources
 
 import (
 	"fmt"
+	"regexp"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	etalbaasv1alpha1 "github.com/kou-etal/etalbaas/operator/api/v1alpha1"
 )
+
+// validIdentRe matches safe SQL identifier characters (lowercase alphanumeric + underscore + hyphen).
+var validIdentRe = regexp.MustCompile(`^[a-z0-9_-]+$`)
 
 // ClusterGVK returns the GroupVersionKind for CloudNativePG Cluster.
 func ClusterGVK() schema.GroupVersionKind {
@@ -120,10 +124,7 @@ func DesiredCloudNativePGCluster(project *etalbaasv1alpha1.Project) *unstructure
 					"initdb": map[string]interface{}{
 						"database":    "postgres",
 						"owner":       "app",
-						"postInitSQL": buildPostInitSQL(pg.Extensions),
-						"postInitApplicationSQL": []interface{}{
-							fmt.Sprintf("CREATE PUBLICATION cdc_%s FOR ALL TABLES", projectID),
-						},
+						"postInitSQL": buildPostInitSQL(pg.Extensions, projectID),
 					},
 				},
 				// CDC dedicated user: REPLICATION + pg_read_all_data (SELECT on all tables).
@@ -201,11 +202,46 @@ func buildPostgresqlSection(params map[string]interface{}, sharedPreloadLibrarie
 	return section
 }
 
-func buildPostInitSQL(extensions []string) []interface{} {
+// allowedExtensions is the set of PostgreSQL extensions that tenants may enable.
+// Only trusted, well-known extensions are allowed to prevent arbitrary SQL execution.
+var allowedExtensions = map[string]bool{
+	"pgvector":   true,
+	"uuid-ossp":  true,
+	"pg_trgm":    true,
+	"hstore":     true,
+	"citext":     true,
+	"btree_gist": true,
+	"btree_gin":  true,
+	"postgis":    true,
+	"pgcrypto":   true,
+	"unaccent":   true,
+}
+
+func buildPostInitSQL(extensions []string, projectID string) []interface{} {
 	stmts := make([]interface{}, 0, len(extensions)+30)
 	for _, ext := range extensions {
+		if !allowedExtensions[ext] {
+			continue
+		}
 		stmts = append(stmts, "CREATE EXTENSION IF NOT EXISTS "+ext+";")
 	}
+
+	// CDC publication: must run as superuser (app user lacks CREATE PUBLICATION privilege).
+	// Validate projectID as a safe SQL identifier to prevent injection.
+	if !validIdentRe.MatchString(projectID) {
+		// Invalid projectID should never reach here (K8s name validation catches it),
+		// but defence-in-depth: use a safe fallback.
+		stmts = append(stmts, "CREATE PUBLICATION cdc_default FOR ALL TABLES;")
+	} else {
+		stmts = append(stmts, fmt.Sprintf("CREATE PUBLICATION cdc_%s FOR ALL TABLES;", projectID))
+	}
+
+	// Grant app user full access to public schema (PG 15+ revokes CREATE by default).
+	stmts = append(stmts,
+		"GRANT ALL ON SCHEMA public TO app;",
+		"ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO app;",
+		"ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO app;",
+	)
 
 	// Auth schema: roles + helper functions (Supabase-compatible).
 	// Required for PostgREST SET LOCAL ROLE and Storage MS RLS enforcement.
@@ -214,9 +250,23 @@ func buildPostInitSQL(extensions []string) []interface{} {
 		"CREATE ROLE authenticated NOLOGIN;",
 		"CREATE ROLE service_role NOLOGIN;",
 		"GRANT anon, authenticated, service_role TO app;",
+		// Grant usage on public schema to API roles so PostgREST can access tables.
+		"GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;",
+		// Default privileges: tables created by app are accessible via PostgREST roles.
+		// RLS policies are the actual access control mechanism.
+		"ALTER DEFAULT PRIVILEGES FOR ROLE app IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO anon, authenticated;",
+		"ALTER DEFAULT PRIVILEGES FOR ROLE app IN SCHEMA public GRANT ALL ON TABLES TO service_role;",
+		"ALTER DEFAULT PRIVILEGES FOR ROLE app IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO anon, authenticated, service_role;",
+		// Event trigger: notify PostgREST to reload schema cache on DDL changes.
+		`CREATE OR REPLACE FUNCTION public.pgrst_watch() RETURNS event_trigger LANGUAGE plpgsql AS $body$ BEGIN NOTIFY pgrst, 'reload schema'; END; $body$;`,
+		`CREATE EVENT TRIGGER pgrst_watch ON ddl_command_end EXECUTE FUNCTION public.pgrst_watch();`,
 		"CREATE SCHEMA IF NOT EXISTS auth;",
-		`CREATE OR REPLACE FUNCTION auth.uid() RETURNS UUID LANGUAGE sql STABLE AS $$ SELECT NULLIF(current_setting('request.jwt.claims', true)::json->>'sub', '')::UUID $$;`,
-		`CREATE OR REPLACE FUNCTION auth.role() RETURNS TEXT LANGUAGE sql STABLE AS $$ SELECT NULLIF(current_setting('request.jwt.claims', true)::json->>'role', '') $$;`,
+		"ALTER SCHEMA auth OWNER TO app;",
+		`CREATE OR REPLACE FUNCTION auth.uid() RETURNS UUID LANGUAGE sql STABLE AS $body$ SELECT NULLIF(current_setting('request.jwt.claims', true)::json->>'sub', '')::UUID $body$;`,
+		`CREATE OR REPLACE FUNCTION auth.role() RETURNS TEXT LANGUAGE sql STABLE AS $body$ SELECT NULLIF(current_setting('request.jwt.claims', true)::json->>'role', '') $body$;`,
+		// Transfer function ownership to app so GoTrue can CREATE OR REPLACE them during its migration.
+		"ALTER FUNCTION auth.uid() OWNER TO app;",
+		"ALTER FUNCTION auth.role() OWNER TO app;",
 		"GRANT USAGE ON SCHEMA auth TO anon, authenticated, service_role;",
 		"GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA auth TO anon, authenticated, service_role;",
 	)
