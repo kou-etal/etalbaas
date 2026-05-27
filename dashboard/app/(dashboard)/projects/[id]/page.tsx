@@ -1,12 +1,24 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { useProject } from "@/features/projects/hooks";
-import { useFunctions } from "@/features/functions/hooks";
+import { useProject, usePauseProject, useResumeProject, useDeleteProject } from "@/features/projects/hooks";
+import { useFunctions, useDeleteFunction } from "@/features/functions/hooks";
 import { functionClient } from "@/lib/api/clients";
-import { useBuckets } from "@/features/storage/hooks";
-import { useApiKeys } from "@/features/api-keys/hooks";
+import { useBuckets, useListObjects, useUploadObject, useDeleteObject } from "@/features/storage/hooks";
+import { storageRestClient } from "@/lib/api/clients";
+import type { StorageObject, PgTable, PgColumn, PgPolicy } from "@/lib/api/clients";
+import { useApiKeys, useCreateApiKey, useRevokeApiKey } from "@/features/api-keys/hooks";
+import { useSecrets, useCreateSecret, useDeleteSecret, useUpdateSecretValue } from "@/features/secrets/hooks";
+import {
+  useTables, useColumns, usePolicies,
+  useCreateTable, useDeleteTable,
+  useCreateColumn, useDeleteColumn,
+  useCreatePolicy, useDeletePolicy,
+  useTableData, useRowCount, useInsertRow, useDeleteRow,
+  useExecuteQuery,
+  useUpdateTable,
+} from "@/features/database/hooks";
 import { formatDate, formatRelative } from "@/lib/utils/format";
 
 /* ===== SVG icon helpers (inline per point.txt) ===== */
@@ -74,7 +86,7 @@ const IconLogs = () => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
 );
 
-type TabName = "overview" | "functions" | "events" | "storage" | "secrets" | "apikeys" | "settings";
+type TabName = "overview" | "database" | "functions" | "events" | "storage" | "secrets" | "apikeys" | "settings";
 
 function CopyBtn({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
@@ -165,9 +177,20 @@ export default function ProjectDetailPage() {
   const { data: functions } = useFunctions(projectId);
   const { data: buckets } = useBuckets(projectId);
   const { data: apiKeys } = useApiKeys(projectId);
+  const { data: secrets } = useSecrets(projectId);
+  const createApiKeyMut = useCreateApiKey();
+  const revokeApiKeyMut = useRevokeApiKey();
+  const createSecretMut = useCreateSecret();
+  const deleteSecretMut = useDeleteSecret();
+  const updateSecretValueMut = useUpdateSecretValue();
+  const pauseProjectMut = usePauseProject();
+  const resumeProjectMut = useResumeProject();
+  const deleteProjectMut = useDeleteProject();
+  const deleteFunctionMut = useDeleteFunction();
 
   const [activeTab, setActiveTab] = useState<TabName>("overview");
   const [menuOpen, setMenuOpen] = useState(false);
+  const [tableMenuOpen, setTableMenuOpen] = useState(false);
   const [revealAnon, setRevealAnon] = useState(false);
   const [revealService, setRevealService] = useState(false);
 
@@ -180,6 +203,8 @@ export default function ProjectDetailPage() {
   const [createKeyModalOpen, setCreateKeyModalOpen] = useState(false);
   const [revokeKeyModalOpen, setRevokeKeyModalOpen] = useState(false);
   const [deployFnModalOpen, setDeployFnModalOpen] = useState(false);
+  const [deleteFnModalOpen, setDeleteFnModalOpen] = useState(false);
+  const [deleteFnTarget, setDeleteFnTarget] = useState<{ id: string; name: string } | null>(null);
 
   /* Delete project */
   const [deleteProjectInput, setDeleteProjectInput] = useState("");
@@ -190,15 +215,18 @@ export default function ProjectDetailPage() {
   const [createKeyName, setCreateKeyName] = useState("");
   const [createKeyRole, setCreateKeyRole] = useState<"anon" | "service_role">("anon");
   const [createKeyExp, setCreateKeyExp] = useState("90");
+  const [createdRawKey, setCreatedRawKey] = useState("");
 
   /* Revoke key */
   const [revokeKeyName, setRevokeKeyName] = useState("");
   const [revokeKeyPrefix, setRevokeKeyPrefix] = useState("");
   const [revokeKeyRole, setRevokeKeyRole] = useState("");
   const [revokeConfirmInput, setRevokeConfirmInput] = useState("");
+  const [revokeKeyId, setRevokeKeyId] = useState("");
 
   /* Secrets */
   const [targetSecretName, setTargetSecretName] = useState("");
+  const [targetSecretId, setTargetSecretId] = useState("");
   const [addSecretName, setAddSecretName] = useState("");
   const [addSecretValue, setAddSecretValue] = useState("");
   const [addSecretDesc, setAddSecretDesc] = useState("");
@@ -207,16 +235,95 @@ export default function ProjectDetailPage() {
   const [secValueRevealed, setSecValueRevealed] = useState(false);
   const [rotateValueRevealed, setRotateValueRevealed] = useState(false);
 
+  /* Functions search/filter */
+  const [fnSearch, setFnSearch] = useState("");
+  const [fnKindFilter, setFnKindFilter] = useState("");
+  const [fnStatusFilter, setFnStatusFilter] = useState("");
+  const [fnSortAsc, setFnSortAsc] = useState(true);
+  const [selectedFnNames, setSelectedFnNames] = useState<Set<string>>(new Set());
+  const filteredFunctions = (functions ?? []).filter(fn => {
+    if (fnSearch && !fn.name.toLowerCase().includes(fnSearch.toLowerCase()) && !(fn.displayName || "").toLowerCase().includes(fnSearch.toLowerCase())) return false;
+    if (fnKindFilter && fn.kind !== fnKindFilter) return false;
+    if (fnStatusFilter && fn.status !== fnStatusFilter) return false;
+    return true;
+  }).sort((a, b) => {
+    const cmp = a.name.localeCompare(b.name);
+    return fnSortAsc ? cmp : -cmp;
+  });
+
   /* Events */
   const [evtFilter, setEvtFilter] = useState("all");
   const [evtExpanded, setEvtExpanded] = useState<Set<string>>(new Set());
   const [liveToggle, setLiveToggle] = useState(true);
 
   /* Storage */
-  const [activeBucket, setActiveBucket] = useState(0);
+  const [activeBucketIdx, setActiveBucketIdx] = useState(0);
   const [storView, setStorView] = useState<"list" | "grid">("list");
   const [uploadOverlayOpen, setUploadOverlayOpen] = useState(false);
   const [fileDetailOpen, setFileDetailOpen] = useState(false);
+  const [selectedObject, setSelectedObject] = useState<StorageObject | null>(null);
+  const [storSearch, setStorSearch] = useState("");
+  const activeBucketName = buckets?.[activeBucketIdx]?.name ?? "";
+  const activeBucketData = buckets?.[activeBucketIdx];
+  const { data: objects, isLoading: objectsLoading } = useListObjects(projectId, activeBucketName);
+  const uploadMutation = useUploadObject();
+  const deleteMutation = useDeleteObject();
+  const [uploadFiles, setUploadFiles] = useState<Array<{ file: File; progress: number; status: "uploading" | "done" | "error" }>>([]);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const filteredObjects = (objects ?? []).filter(obj =>
+    !storSearch || obj.name.toLowerCase().includes(storSearch.toLowerCase())
+  );
+
+  const handleFileUpload = useCallback(async (files: FileList) => {
+    if (!activeBucketName) return;
+    const entries = Array.from(files).map(file => ({ file, progress: 0, status: "uploading" as const }));
+    setUploadFiles(entries);
+    for (let i = 0; i < entries.length; i++) {
+      try {
+        await uploadMutation.mutateAsync({
+          projectId,
+          bucket: activeBucketName,
+          path: entries[i].file.name,
+          file: entries[i].file,
+        });
+        setUploadFiles(prev => prev.map((e, j) => j === i ? { ...e, progress: 100, status: "done" } : e));
+      } catch {
+        setUploadFiles(prev => prev.map((e, j) => j === i ? { ...e, status: "error" } : e));
+      }
+    }
+  }, [activeBucketName, projectId, uploadMutation]);
+
+  const handleFileDownload = useCallback(async (objName: string) => {
+    if (!activeBucketName) return;
+    try {
+      const response = await storageRestClient.downloadObject(projectId, activeBucketName, objName);
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = objName.split("/").pop() || objName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("Download failed:", err);
+    }
+  }, [activeBucketName, projectId]);
+
+  const handleFileDelete = useCallback(async (objName: string) => {
+    if (!activeBucketName || !confirm(`Delete "${objName}"?`)) return;
+    try {
+      await deleteMutation.mutateAsync({ projectId, bucket: activeBucketName, path: objName });
+      if (selectedObject?.name === objName) {
+        setSelectedObject(null);
+        setFileDetailOpen(false);
+      }
+    } catch (err) {
+      console.error("Delete failed:", err);
+    }
+  }, [activeBucketName, projectId, deleteMutation, selectedObject]);
 
   /* Deploy Function */
   const [fnName, setFnName] = useState("");
@@ -291,6 +398,7 @@ export default function ProjectDetailPage() {
       };
       if (sourceTab === "inline") req.inlineSource = { code: inlineCode, filename: inlineFilename };
       else if (sourceTab === "git") req.gitSource = { repoUrl: gitUrl, branch: gitBranch, subpath: gitSubpath };
+      else if (sourceTab === "zip") req.zipSource = { path: zipPath };
       if (runtimeTab === "preset") {
         const deps = runtimeDeps.trim() ? runtimeDeps.trim().split("\n").map(s => s.trim()).filter(Boolean) : undefined;
         req.presetRuntime = { preset: runtimePreset, ...(deps ? { requirements: deps } : {}) };
@@ -317,6 +425,87 @@ export default function ProjectDetailPage() {
   /* Secrets banner */
   const [secBannerDismissed, setSecBannerDismissed] = useState(false);
 
+  /* Database */
+  const [dbSub, setDbSub] = useState<"tables" | "sql" | "conn">("tables");
+  const [dbView, setDbView] = useState<"columns" | "data" | "rls" | "indexes">("columns");
+  const [selectedTableId, setSelectedTableId] = useState<number | null>(null);
+  const [collapsedSchemas, setCollapsedSchemas] = useState<Set<string>>(new Set(["storage", "auth"]));
+  const [sqlResultTab, setSqlResultTab] = useState<"results" | "messages">("results");
+  const [sqlQuery, setSqlQuery] = useState("-- Write your SQL here\nSELECT 1;");
+  const [dataPage, setDataPage] = useState(0);
+  const dataPageSize = 50;
+
+  // Database hooks
+  const { data: dbTables, isLoading: dbTablesLoading } = useTables(projectId);
+  const selectedTable = dbTables?.find(t => t.id === selectedTableId) ?? null;
+  const selectedTableName = selectedTable?.name ?? "";
+  const selectedTableSchema = selectedTable?.schema ?? "public";
+  const { data: dbColumns } = useColumns(projectId, selectedTableId ?? 0);
+  const { data: dbPolicies } = usePolicies(projectId);
+  const { data: dbTableData, isLoading: dbDataLoading } = useTableData(projectId, selectedTableName, dataPageSize, dataPage * dataPageSize);
+  const { data: dbRowCount } = useRowCount(projectId, selectedTableName);
+  const createTableMut = useCreateTable(projectId);
+  const deleteTableMut = useDeleteTable(projectId);
+  const createColumnMut = useCreateColumn(projectId);
+  const deleteColumnMut = useDeleteColumn(projectId);
+  const createPolicyMut = useCreatePolicy(projectId);
+  const deletePolicyMut = useDeletePolicy(projectId);
+  const insertRowMut = useInsertRow(projectId, selectedTableName);
+  const deleteRowMut = useDeleteRow(projectId, selectedTableName);
+  const executeQueryMut = useExecuteQuery(projectId);
+  const updateTableMut = useUpdateTable(projectId);
+
+  // DB modal states
+  const [newTableModalOpen, setNewTableModalOpen] = useState(false);
+  const [newTableName, setNewTableName] = useState("");
+  const [addColumnModalOpen, setAddColumnModalOpen] = useState(false);
+  const [newColName, setNewColName] = useState("");
+  const [newColType, setNewColType] = useState("text");
+  const [newColNullable, setNewColNullable] = useState(true);
+  const [insertRowModalOpen, setInsertRowModalOpen] = useState(false);
+  const [insertRowData, setInsertRowData] = useState<Record<string, string>>({});
+  const [newPolicyModalOpen, setNewPolicyModalOpen] = useState(false);
+  const [newPolicyName, setNewPolicyName] = useState("");
+  const [newPolicyDefinition, setNewPolicyDefinition] = useState("true");
+  const [sqlMessages, setSqlMessages] = useState<string[]>([]);
+
+  // Auto-select first table when tables load
+  useEffect(() => {
+    if (dbTables && dbTables.length > 0 && selectedTableId === null) {
+      const publicTables = dbTables.filter(t => t.schema === "public");
+      if (publicTables.length > 0) setSelectedTableId(publicTables[0].id);
+      else setSelectedTableId(dbTables[0].id);
+    }
+  }, [dbTables, selectedTableId]);
+
+  const toggleSchema = (schema: string) => {
+    setCollapsedSchemas(prev => {
+      const next = new Set(prev);
+      if (next.has(schema)) next.delete(schema); else next.add(schema);
+      return next;
+    });
+  };
+
+  // Group tables by schema
+  const tablesBySchema = (dbTables ?? []).reduce<Record<string, PgTable[]>>((acc, t) => {
+    (acc[t.schema] ??= []).push(t);
+    return acc;
+  }, {});
+  const schemaOrder = Object.keys(tablesBySchema).sort((a, b) => {
+    if (a === "public") return -1;
+    if (b === "public") return 1;
+    return a.localeCompare(b);
+  });
+  const systemSchemas = new Set(["auth", "storage", "extensions", "pgbouncer", "realtime", "pgsodium", "vault", "_realtime"]);
+
+  const tablePolicies = (dbPolicies ?? []).filter(
+    p => selectedTable && p.table === selectedTable.name && p.schema === selectedTable.schema
+  );
+
+  const totalPages = dbRowCount ? Math.ceil(dbRowCount / dataPageSize) : 1;
+
+  const primaryKeyCol = selectedTable?.primary_keys?.[0]?.name ?? dbColumns?.[0]?.name ?? "id";
+
   /* Settings */
   const [settingsSection, setSettingsSection] = useState<"general" | "services" | "danger">("general");
   const [stgName, setStgName] = useState("");
@@ -339,15 +528,19 @@ export default function ProjectDetailPage() {
   const bucketCount = buckets?.length ?? 0;
   const bucketPublic = buckets?.filter((b) => b.accessLevel === "public").length ?? 0;
   const bucketPrivate = bucketCount - bucketPublic;
-  const akCount = apiKeys?.length ?? 0;
+  const activeApiKeys = apiKeys?.filter((k) => !k.revokedAt);
+  const akCount = activeApiKeys?.length ?? 0;
 
-  // Close kebab on outside click
+  // Close kebab on outside click (skip clicks on the toggle buttons themselves)
   useEffect(() => {
-    if (!menuOpen) return;
-    const handler = () => setMenuOpen(false);
+    const handler = (e: MouseEvent) => {
+      const t = e.target as HTMLElement;
+      if (!t.closest?.('[aria-label="More actions"]')) setMenuOpen(false);
+      if (!t.closest?.(".icon-menu-btn")) setTableMenuOpen(false);
+    };
     document.addEventListener("click", handler);
     return () => document.removeEventListener("click", handler);
-  }, [menuOpen]);
+  }, []);
 
   const toggleEvtExpanded = (trace: string) => {
     setEvtExpanded(prev => {
@@ -359,6 +552,7 @@ export default function ProjectDetailPage() {
 
   const tabs: { key: TabName; label: string; count?: number }[] = [
     { key: "overview", label: "Overview" },
+    { key: "database", label: "Database" },
     { key: "functions", label: "Functions", count: fnCount || undefined },
     { key: "events", label: "Events" },
     { key: "storage", label: "Storage", count: bucketCount || undefined },
@@ -427,16 +621,18 @@ export default function ProjectDetailPage() {
               aria-label="More actions"
               aria-haspopup="menu"
               aria-expanded={menuOpen}
-              onClick={(e) => { e.stopPropagation(); setMenuOpen(!menuOpen); }}
+              onClick={() => setMenuOpen(!menuOpen)}
             >
               <IconKebab />
             </button>
-            <div className={`menu ${menuOpen ? "open" : ""}`} role="menu">
-              <div className="menu-item"><IconDuplicate /> Duplicate project</div>
-              <div className="menu-item"><IconDownload /> Export config</div>
-              <div className="menu-divider" />
-              <div className="menu-item danger" onClick={() => { setMenuOpen(false); setDeleteProjectModalOpen(true); }}><IconTrash /> Delete project</div>
-            </div>
+            {menuOpen && (
+              <div className="menu open" role="menu">
+                <div className="menu-item"><IconDuplicate /> Duplicate project</div>
+                <div className="menu-item"><IconDownload /> Export config</div>
+                <div className="menu-divider" />
+                <div className="menu-item danger" onClick={() => { setMenuOpen(false); setDeleteProjectModalOpen(true); }}><IconTrash /> Delete project</div>
+              </div>
+            )}
           </div>
         </div>
       </header>
@@ -483,7 +679,7 @@ export default function ProjectDetailPage() {
                 <div className="meta-grid">
                   <div><span className="lbl">Created</span><span className="val">{project?.createdAt ? formatDate(project.createdAt) : "\u2014"}</span></div>
                   <div><span className="lbl">Last updated</span><span className="val">{project?.updatedAt ? formatRelative(project.updatedAt) : "\u2014"}</span></div>
-                  <div><span className="lbl">Region</span><span className="val mono" style={{ fontSize: 12 }}>self-hosted</span></div>
+                  <div><span className="lbl">Environment</span><span className="val mono" style={{ fontSize: 12 }}>self-hosted</span></div>
                   <div><span className="lbl">Plan</span><span className="val">Self-hosted &middot; Unlimited</span></div>
                   <div style={{ gridColumn: "1 / -1" }}>
                     <span className="lbl" style={{ marginBottom: 8 }}>Enabled services</span>
@@ -549,10 +745,10 @@ export default function ProjectDetailPage() {
                   <div className="panel-head"><h3>Connect to your project</h3></div>
                   <div className="row"><span className="row-lbl">API endpoint</span><div className="connect-field"><span className="value">{apiEndpoint}</span><span className="field-btns"><CopyBtn text={apiEndpoint} /></span></div></div>
                   {anonKey && (
-                    <div className="row"><span className="row-lbl">Anon key <span className="role-tag anon">public</span></span><div className="connect-field"><span className={`value ${revealAnon ? "" : "masked"}`}>{revealAnon ? `${anonKey.keyPrefix}XXXXXXXXXXXXXXXXXX` : `${anonKey.keyPrefix}\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022`}</span><span className="field-btns"><button className="field-btn" onClick={() => setRevealAnon(!revealAnon)} aria-label="Reveal key"><IconEye /></button><CopyBtn text={anonKey.keyPrefix} /></span></div></div>
+                    <div className="row"><span className="row-lbl">Anon key <span className="role-tag anon">public</span></span><div className="connect-field"><span className={`value mono ${revealAnon ? "" : "masked"}`}>{revealAnon ? `${anonKey.keyPrefix}XXXXXXXXXXXXXXXXXX` : `\u25cf\u25cf\u25cf\u25cf\u25cf\u25cf\u25cf\u25cf\u25cf\u25cf\u25cf\u25cf\u25cf\u25cf\u25cf\u25cf\u25cf\u25cf\u25cf\u25cf\u25cf\u25cf\u25cf\u25cf\u25cf\u25cf\u25cf\u25cf\u25cf\u25cf\u25cf\u25cf`}</span><span className="field-btns"><button className="field-btn" onClick={() => setRevealAnon(!revealAnon)} aria-label="Reveal key"><IconEye /></button><CopyBtn text={anonKey.keyPrefix} /></span></div></div>
                   )}
                   {serviceKey && (
-                    <div className="row"><span className="row-lbl">Service role key <span className="role-tag">secret</span></span><div className="connect-field"><span className={`value ${revealService ? "" : "masked"}`}>{revealService ? `${serviceKey.keyPrefix}XXXXXXXXXXXXXXXXXX` : `${serviceKey.keyPrefix}\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022`}</span><span className="field-btns"><button className="field-btn" onClick={() => setRevealService(!revealService)} aria-label="Reveal key"><IconEye /></button><CopyBtn text={serviceKey.keyPrefix} /></span></div></div>
+                    <div className="row"><span className="row-lbl">Service role key <span className="role-tag">secret</span></span><div className="connect-field"><span className={`value mono ${revealService ? "" : "masked"}`}>{revealService ? `${serviceKey.keyPrefix}XXXXXXXXXXXXXXXXXX` : `\u25cf\u25cf\u25cf\u25cf\u25cf\u25cf\u25cf\u25cf\u25cf\u25cf\u25cf\u25cf\u25cf\u25cf\u25cf\u25cf\u25cf\u25cf\u25cf\u25cf\u25cf\u25cf\u25cf\u25cf\u25cf\u25cf\u25cf\u25cf\u25cf\u25cf\u25cf\u25cf`}</span><span className="field-btns"><button className="field-btn" onClick={() => setRevealService(!revealService)} aria-label="Reveal key"><IconEye /></button><CopyBtn text={serviceKey.keyPrefix} /></span></div></div>
                   )}
                   <details className="snippet">
                     <summary><svg className="chev" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>Quick start &mdash; JavaScript</summary>
@@ -560,6 +756,598 @@ export default function ProjectDetailPage() {
                   </details>
                 </div>
               </section>
+            </>
+          )}
+
+          {/* ====== Database tab ====== */}
+          {activeTab === "database" && (
+            <>
+              <header className="tab-head">
+                <div>
+                  <h2>Database</h2>
+                  <p>Inspect tables, run queries, and grab connection strings for this project&apos;s PostgreSQL cluster.</p>
+                </div>
+                <div className="actions">
+                  <nav className="sub-tabs" role="tablist">
+                    <button className={dbSub === "tables" ? "active" : ""} onClick={() => setDbSub("tables")} role="tab" aria-selected={dbSub === "tables"}>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"></ellipse><path d="M3 5v14c0 1.66 4.03 3 9 3s9-1.34 9-3V5"></path><path d="M3 12c0 1.66 4.03 3 9 3s9-1.34 9-3"></path></svg>
+                      Tables
+                    </button>
+                    <button className={dbSub === "sql" ? "active" : ""} onClick={() => setDbSub("sql")} role="tab" aria-selected={dbSub === "sql"}>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>
+                      SQL Editor
+                    </button>
+                    <button className={dbSub === "conn" ? "active" : ""} onClick={() => setDbSub("conn")} role="tab" aria-selected={dbSub === "conn"}>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>
+                      Connection
+                    </button>
+                  </nav>
+                </div>
+              </header>
+
+              {/* ===== Sub: Tables ===== */}
+              {dbSub === "tables" && (
+                <div className="tables-split">
+                  {/* Schema sidebar */}
+                  <aside className="schema-sidebar">
+                    <div className="schema-sidebar-head">
+                      <h4>Schemas</h4>
+                      <span className="search-icon" title="Search tables">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg>
+                      </span>
+                    </div>
+                    <div className="schema-list">
+                      {dbTablesLoading && <div style={{ padding: "12px 16px", color: "var(--fg-mute)", fontSize: 12 }}>Loading tables...</div>}
+                      {schemaOrder.map(schema => (
+                        <div key={schema} className={`schema-group${systemSchemas.has(schema) ? " system" : ""}${collapsedSchemas.has(schema) ? " collapsed" : ""}`} data-schema={schema}>
+                          <button className="schema-group-head" onClick={() => toggleSchema(schema)}>
+                            <svg className="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                            <span className="schema-name">{schema}</span>
+                            {systemSchemas.has(schema) && <span className="schema-tag">System</span>}
+                          </button>
+                          <div className="schema-tables">
+                            {(tablesBySchema[schema] ?? []).map(tbl => (
+                              <button key={tbl.id} className={`schema-table${selectedTableId === tbl.id ? " active" : ""}`} onClick={() => { setSelectedTableId(tbl.id); setDataPage(0); }}>
+                                <svg className="tbl-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"></ellipse><path d="M3 5v14c0 1.66 4.03 3 9 3s9-1.34 9-3V5"></path><path d="M3 12c0 1.66 4.03 3 9 3s9-1.34 9-3"></path></svg>
+                                {tbl.name}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="schema-sidebar-foot">
+                      <button className="new-table-btn" onClick={() => { setNewTableName(""); setNewTableModalOpen(true); }}>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 5v14M5 12h14"></path></svg>
+                        New Table
+                      </button>
+                    </div>
+                  </aside>
+
+                  {/* Table main */}
+                  <div className="table-main">
+                    <div className="table-main-head">
+                      <div className="title-wrap">
+                        <h2><span className="schema-prefix">{selectedTableSchema}.</span><span>{selectedTableName}</span></h2>
+                        {selectedTable && (
+                          <span className={`rls-badge${selectedTable.rls_enabled ? " on" : ""}`}>
+                            <span className="dt"></span>{selectedTable.rls_enabled ? "RLS Enabled" : "RLS Disabled"}
+                          </span>
+                        )}
+                      </div>
+                      <div className="actions">
+                        <button className="toolbar-btn" onClick={() => { setNewColName(""); setNewColType("text"); setNewColNullable(true); setAddColumnModalOpen(true); }}>
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 5v14M5 12h14"></path></svg>
+                          Add Column
+                        </button>
+                        <div className={`icon-menu-btn${tableMenuOpen ? " open" : ""}`} onClick={() => setTableMenuOpen(!tableMenuOpen)}>
+                          <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.5"></circle><circle cx="12" cy="12" r="1.5"></circle><circle cx="12" cy="19" r="1.5"></circle></svg>
+                          <div className="menu-dropdown">
+                            <button onClick={() => {
+                              if (!selectedTableName) return;
+                              executeQueryMut.mutate(`SELECT * FROM ${selectedTableSchema}.${selectedTableName} LIMIT 0`);
+                            }}>
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                              Duplicate Structure
+                            </button>
+                            <button onClick={() => {
+                              if (!selectedTableName) return;
+                              setSqlQuery(`-- Export: ${selectedTableSchema}.${selectedTableName}\nSELECT * FROM ${selectedTableSchema}.${selectedTableName};`);
+                              setDbSub("sql");
+                            }}>
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                              Export as SQL
+                            </button>
+                            <div className="sep"></div>
+                            <button className="danger" onClick={() => {
+                              if (!selectedTableName || !confirm(`Truncate table ${selectedTableName}? This will delete all rows.`)) return;
+                              executeQueryMut.mutate(`TRUNCATE TABLE ${selectedTableSchema}.${selectedTableName}`);
+                            }}>
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"></path><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path></svg>
+                              Truncate
+                            </button>
+                            <button className="danger" onClick={() => {
+                              if (!selectedTableId || !confirm(`Drop table ${selectedTableName}? This cannot be undone.`)) return;
+                              deleteTableMut.mutate(selectedTableId, {
+                                onSuccess: () => setSelectedTableId(null),
+                              });
+                            }}>
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"></path></svg>
+                              Drop Table
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Mini tabs */}
+                    <div className="mini-tabs" role="tablist">
+                      {(["columns", "data", "rls", "indexes"] as const).map(v => (
+                        <button key={v} className={`mini-tab${dbView === v ? " active" : ""}`} onClick={() => setDbView(v)} role="tab" aria-selected={dbView === v}>
+                          {v === "columns" ? "Columns" : v === "data" ? "Data" : v === "rls" ? "RLS Policies" : "Indexes"}
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Columns view */}
+                    <div className={`mini-pane${dbView === "columns" ? " active" : ""}`}>
+                      <div className="col-table">
+                        <div className="row head">
+                          <div className="cell">Name</div>
+                          <div className="cell">Type</div>
+                          <div className="cell">Default</div>
+                          <div className="cell">Nullable</div>
+                          <div className="cell">Primary</div>
+                          <div className="cell">Unique</div>
+                          <div className="cell"></div>
+                        </div>
+                        {(dbColumns ?? []).map(col => {
+                          const isPk = selectedTable?.primary_keys?.some(pk => pk.name === col.name);
+                          return (
+                            <div key={col.id} className="row body">
+                              <div className="cell"><span className="col-name">{isPk && <svg className="pk-key" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="8" cy="15" r="4"></circle><path d="M10.85 12.15L19 4"></path><path d="M18 5l3 3"></path><path d="M15 8l3 3"></path></svg>}{col.name}</span></div>
+                              <div className="cell"><span className="col-type">{col.format}</span></div>
+                              <div className="cell">{col.default_value ? <span className="col-default">{col.default_value}</span> : <span className="col-default empty">&mdash;</span>}</div>
+                              <div className="cell"><span className={`col-check${col.is_nullable ? " yes" : ""}`}>{col.is_nullable ? <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg> : <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>}</span></div>
+                              <div className="cell"><span className={`col-check${isPk ? " yes" : ""}`}>{isPk ? <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg> : <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>}</span></div>
+                              <div className="cell"><span className={`col-check${col.is_unique ? " yes" : ""}`}>{col.is_unique ? <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg> : <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>}</span></div>
+                              <div className="cell"><div className="col-actions"><button title="Edit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4z"></path></svg></button><button className="del" title="Delete" onClick={() => { if (confirm(`Delete column ${col.name}?`)) deleteColumnMut.mutate(col.id); }}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"></path></svg></button></div></div>
+                            </div>
+                          );
+                        })}
+                        {(dbColumns ?? []).length === 0 && <div className="row body"><div className="cell" style={{ gridColumn: "1 / -1", color: "var(--fg-mute)" }}>No columns</div></div>}
+                      </div>
+                    </div>
+
+                    {/* Data view */}
+                    <div className={`mini-pane${dbView === "data" ? " active" : ""}`}>
+                      <div className="data-toolbar">
+                        <div className="left">
+                          <span className="row-count">{dbRowCount ?? 0} rows</span>
+                        </div>
+                        <div className="right">
+                          <button className="toolbar-btn" onClick={() => { /* TODO: filter UI */ }}>
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon></svg>
+                            Filter
+                          </button>
+                          <button className="toolbar-btn" onClick={() => setDataPage(p => p)}>
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+                            Refresh
+                          </button>
+                          <button className="toolbar-btn primary" onClick={() => { setInsertRowData({}); setInsertRowModalOpen(true); }}>
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M12 5v14M5 12h14"></path></svg>
+                            Insert Row
+                          </button>
+                        </div>
+                      </div>
+                      <div className="data-table-wrap">
+                        {dbDataLoading ? (
+                          <div style={{ padding: "24px", color: "var(--fg-mute)", textAlign: "center" }}>Loading data...</div>
+                        ) : (
+                        <table className="data-table">
+                          <thead>
+                            <tr>
+                              {(dbColumns ?? []).map(col => <th key={col.id}>{col.name}</th>)}
+                              <th className="actions"></th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(dbTableData ?? []).map((row, ri) => (
+                              <tr key={ri}>
+                                {(dbColumns ?? []).map(col => {
+                                  const val = row[col.name];
+                                  const isNull = val === null || val === undefined;
+                                  const isUuid = col.format === "uuid" && typeof val === "string";
+                                  return (
+                                    <td key={col.id} className={isNull ? "null" : isUuid ? "uuid" : ""}>
+                                      {isNull ? "NULL" : isUuid ? `${String(val).slice(0, 8)}...` : String(val)}
+                                    </td>
+                                  );
+                                })}
+                                <td><div className="row-actions"><button title="Edit row"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4z"></path></svg></button><button className="del" onClick={() => { if (confirm("Delete this row?")) deleteRowMut.mutate({ pkCol: primaryKeyCol, pkVal: row[primaryKeyCol] }); }}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"></path></svg></button></div></td>
+                              </tr>
+                            ))}
+                            {(dbTableData ?? []).length === 0 && <tr><td colSpan={(dbColumns?.length ?? 1) + 1} style={{ color: "var(--fg-mute)", textAlign: "center" }}>No data</td></tr>}
+                          </tbody>
+                        </table>
+                        )}
+                      </div>
+                      <div className="pagination-bar">
+                        <span>Showing {dataPage * dataPageSize + 1}&ndash;{Math.min((dataPage + 1) * dataPageSize, dbRowCount ?? 0)} of {dbRowCount ?? 0} rows</span>
+                        <div className="pages">
+                          <button className="pg-btn" disabled={dataPage === 0} onClick={() => setDataPage(p => Math.max(0, p - 1))}>&larr;</button>
+                          {Array.from({ length: Math.min(totalPages, 5) }, (_, i) => (
+                            <button key={i} className={`pg-btn${dataPage === i ? " active" : ""}`} onClick={() => setDataPage(i)}>{i + 1}</button>
+                          ))}
+                          <button className="pg-btn" disabled={dataPage >= totalPages - 1} onClick={() => setDataPage(p => p + 1)}>&rarr;</button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* RLS Policies view */}
+                    <div className={`mini-pane${dbView === "rls" ? " active" : ""}`}>
+                      <div className="rls-toolbar">
+                        <div className="toggle-wrap">
+                          <input type="checkbox" className="rls-switch" checked={selectedTable?.rls_enabled ?? false} onChange={(e) => {
+                            if (selectedTableId) updateTableMut.mutate({ tableId: selectedTableId, rls_enabled: e.target.checked });
+                          }} />
+                          <span>RLS: <strong style={{ color: selectedTable?.rls_enabled ? "var(--ok)" : "var(--warn)" }}>{selectedTable?.rls_enabled ? "Enabled" : "Disabled"}</strong></span>
+                        </div>
+                        <button className="toolbar-btn primary" onClick={() => { setNewPolicyName(""); setNewPolicyDefinition("true"); setNewPolicyModalOpen(true); }}>
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M12 5v14M5 12h14"></path></svg>
+                          New Policy
+                        </button>
+                      </div>
+                      {tablePolicies.map(policy => (
+                        <div key={policy.id} className="policy-card">
+                          <div className="pc-head">
+                            <span className="pc-name"><span className="ind"></span>{policy.name}</span>
+                            <div className="pc-actions">
+                              <button>Edit</button>
+                              <button className="del" onClick={() => { if (confirm(`Drop policy ${policy.name}?`)) deletePolicyMut.mutate(policy.id); }}>Drop</button>
+                            </div>
+                          </div>
+                          <div className="pc-row">
+                            <span className="lbl">Roles</span>
+                            <span className="val">{policy.roles.map(r => <span key={r} className="pill">{r}</span>)}</span>
+                          </div>
+                          <div className="pc-row">
+                            <span className="lbl">Command</span>
+                            <span className="val"><span className="pill">{policy.command}</span></span>
+                          </div>
+                          {policy.definition && (
+                            <div className="pc-row" style={{ display: "block" }}>
+                              <span className="lbl">USING</span>
+                              <div className="pc-sql" style={{ marginTop: 4 }}>{policy.definition}</div>
+                            </div>
+                          )}
+                          {policy.check && (
+                            <div className="pc-row" style={{ display: "block" }}>
+                              <span className="lbl">CHECK</span>
+                              <div className="pc-sql" style={{ marginTop: 4 }}>{policy.check}</div>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                      {tablePolicies.length === 0 && <div style={{ padding: "24px", color: "var(--fg-mute)", textAlign: "center" }}>No policies defined for this table</div>}
+                    </div>
+
+                    {/* Indexes view */}
+                    <div className={`mini-pane${dbView === "indexes" ? " active" : ""}`}>
+                      <div className="data-toolbar">
+                        <div className="left" style={{ color: "var(--fg-mute)", fontSize: 12 }}>2 indexes</div>
+                        <div className="right">
+                          <button className="toolbar-btn primary">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M12 5v14M5 12h14"></path></svg>
+                            Create Index
+                          </button>
+                        </div>
+                      </div>
+                      <div className="idx-table">
+                        <div className="row head">
+                          <div className="cell">Name</div>
+                          <div className="cell">Columns</div>
+                          <div className="cell">Type</div>
+                          <div className="cell">Unique</div>
+                          <div className="cell"></div>
+                        </div>
+                        <div className="row body">
+                          <div className="cell"><span className="idx-name">profiles_pkey</span></div>
+                          <div className="cell"><span className="idx-cols">id</span></div>
+                          <div className="cell"><span className="idx-type">btree</span></div>
+                          <div className="cell"><span className="col-check yes"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg></span></div>
+                          <div className="cell"><div className="col-actions" style={{ opacity: 1 }}><button className="del"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"></path></svg></button></div></div>
+                        </div>
+                        <div className="row body">
+                          <div className="cell"><span className="idx-name">profiles_email_idx</span></div>
+                          <div className="cell"><span className="idx-cols">email</span></div>
+                          <div className="cell"><span className="idx-type">btree</span></div>
+                          <div className="cell"><span className="col-check yes"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg></span></div>
+                          <div className="cell"><div className="col-actions" style={{ opacity: 1 }}><button className="del"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"></path></svg></button></div></div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* ===== Sub: SQL Editor ===== */}
+              {dbSub === "sql" && (
+                <div className="sql-editor-frame">
+                  <div className="sql-editor-toolbar">
+                    <div className="left">
+                      <button className="toolbar-btn primary" disabled={executeQueryMut.isPending} onClick={() => {
+                        const now = new Date().toLocaleTimeString("en-US", { hour12: false });
+                        executeQueryMut.mutate(sqlQuery, {
+                          onSuccess: (result) => {
+                            const count = Array.isArray(result) ? result.length : 0;
+                            setSqlMessages(prev => [...prev, `[${now}] Query executed successfully. ${count} rows returned.`]);
+                            setSqlResultTab("results");
+                          },
+                          onError: (err) => {
+                            setSqlMessages(prev => [...prev, `[${now}] ERROR: ${err.message}`]);
+                            setSqlResultTab("messages");
+                          },
+                        });
+                      }}>
+                        <svg viewBox="0 0 24 24" fill="currentColor"><polygon points="6 4 20 12 6 20 6 4"></polygon></svg>
+                        {executeQueryMut.isPending ? "Running..." : "Run"}
+                      </button>
+                      <span className="kbd">Ctrl + Enter</span>
+                    </div>
+                    <div className="right">
+                      <button className="toolbar-btn" onClick={() => { setSqlQuery(""); setSqlMessages([]); executeQueryMut.reset(); }}>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"></path></svg>
+                        Clear
+                      </button>
+                    </div>
+                  </div>
+                  <div className="sql-editor-area">
+                    <div className="sql-line-numbers">{sqlQuery.split("\n").map((_, i) => i + 1).join("\n")}</div>
+                    <textarea
+                      className="sql-code"
+                      spellCheck="false"
+                      value={sqlQuery}
+                      onChange={(e) => setSqlQuery(e.target.value)}
+                      onKeyDown={(e) => {
+                        if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+                          e.preventDefault();
+                          const now = new Date().toLocaleTimeString("en-US", { hour12: false });
+                          executeQueryMut.mutate(sqlQuery, {
+                            onSuccess: (result) => {
+                              const count = Array.isArray(result) ? result.length : 0;
+                              setSqlMessages(prev => [...prev, `[${now}] Query executed successfully. ${count} rows returned.`]);
+                              setSqlResultTab("results");
+                            },
+                            onError: (err) => {
+                              setSqlMessages(prev => [...prev, `[${now}] ERROR: ${err.message}`]);
+                              setSqlResultTab("messages");
+                            },
+                          });
+                        }
+                      }}
+                      style={{ width: "100%", minHeight: 120, resize: "vertical", background: "transparent", color: "var(--fg)", border: "none", outline: "none", fontFamily: "inherit", fontSize: "inherit", lineHeight: "inherit", padding: 0 }}
+                    />
+                  </div>
+                  <div className="sql-results-frame">
+                    <div className="sql-results-tabs" role="tablist">
+                      <button className={sqlResultTab === "results" ? "active" : ""} onClick={() => setSqlResultTab("results")} role="tab" aria-selected={sqlResultTab === "results"}>Results</button>
+                      <button className={sqlResultTab === "messages" ? "active" : ""} onClick={() => setSqlResultTab("messages")} role="tab" aria-selected={sqlResultTab === "messages"}>Messages</button>
+                    </div>
+                    <div className={`sql-results-pane${sqlResultTab === "results" ? " active" : ""}`}>
+                      {executeQueryMut.data ? (() => {
+                        const rows = executeQueryMut.data;
+                        const cols = rows.length > 0 ? Object.keys(rows[0]) : [];
+                        return (
+                        <>
+                          <div className="data-table-wrap" style={{ maxHeight: "none" }}>
+                            <table className="data-table">
+                              <thead>
+                                <tr>
+                                  {cols.map((c, i) => <th key={i}>{c}</th>)}
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {rows.map((row, ri) => (
+                                  <tr key={ri}>
+                                    {cols.map((c, ci) => {
+                                      const val = row[c];
+                                      return <td key={ci} className={val === null ? "null" : ""}>{val === null ? "NULL" : String(val)}</td>;
+                                    })}
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                          <div className="sql-result-meta">
+                            <span className="dot-ok"></span>
+                            <span>{rows.length} rows returned</span>
+                          </div>
+                        </>
+                        );
+                      })() : executeQueryMut.isError ? (
+                        <div className="sql-message" style={{ color: "var(--err)" }}>{executeQueryMut.error?.message}</div>
+                      ) : (
+                        <div style={{ padding: "24px", color: "var(--fg-mute)", textAlign: "center" }}>Run a query to see results</div>
+                      )}
+                    </div>
+                    <div className={`sql-results-pane${sqlResultTab === "messages" ? " active" : ""}`}>
+                      {sqlMessages.length > 0 ? sqlMessages.map((msg, i) => (
+                        <div key={i} className={`sql-message${msg.includes("ERROR") ? "" : " success"}`}>{msg}</div>
+                      )) : (
+                        <div style={{ padding: "24px", color: "var(--fg-mute)", textAlign: "center" }}>No messages</div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* ===== Sub: Connection ===== */}
+              {dbSub === "conn" && (
+                <>
+                  <div className="conn-panels">
+                    {/* Direct connection */}
+                    <div className="conn-panel">
+                      <div className="conn-panel-head">
+                        <div>
+                          <h3>Direct connection</h3>
+                          <span className="sub">Connect from any PostgreSQL client (psql, DBeaver, TablePlus).</span>
+                        </div>
+                        <span className="badge-ok"><span className="dt"></span>Healthy</span>
+                      </div>
+                      <div className="conn-row">
+                        <span className="label">Host</span>
+                        <span className="val">
+                          <span className="vtext">xk7a9bc2.db.local.etalbaas.dev</span>
+                          <button className="icon-btn" title="Copy" aria-label="Copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></button>
+                        </span>
+                      </div>
+                      <div className="conn-row">
+                        <span className="label">Port</span>
+                        <span className="val">
+                          <span className="vtext">5432</span>
+                          <button className="icon-btn" title="Copy" aria-label="Copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></button>
+                        </span>
+                      </div>
+                      <div className="conn-row">
+                        <span className="label">Database</span>
+                        <span className="val">
+                          <span className="vtext">postgres</span>
+                          <button className="icon-btn" title="Copy" aria-label="Copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></button>
+                        </span>
+                      </div>
+                      <div className="conn-row">
+                        <span className="label">User</span>
+                        <span className="val">
+                          <span className="vtext">app</span>
+                          <button className="icon-btn" title="Copy" aria-label="Copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></button>
+                        </span>
+                      </div>
+                      <div className="conn-row">
+                        <span className="label">Password</span>
+                        <span className="val">
+                          <span className="vtext masked">••••••••••••••••</span>
+                          <button className="icon-btn" title="Show / hide" aria-label="Toggle visibility"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg></button>
+                          <button className="icon-btn" title="Copy" aria-label="Copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></button>
+                        </span>
+                      </div>
+                      <div className="conn-row">
+                        <span className="label">Connection String</span>
+                        <span className="val">
+                          <span className="vtext">postgresql://app:****@xk7a9bc2.db.local.etalbaas.dev:5432/postgres?sslmode=require</span>
+                          <button className="icon-btn" title="Copy" aria-label="Copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></button>
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* PostgREST API */}
+                    <div className="conn-panel">
+                      <div className="conn-panel-head">
+                        <div>
+                          <h3>PostgREST API</h3>
+                          <span className="sub">Instant REST API. Tables and views are auto-exposed under <span className="mono" style={{ color: "var(--fg-dim)" }}>/rest/{"{table}"}</span>.</span>
+                        </div>
+                      </div>
+                      <div className="conn-row">
+                        <span className="label">REST URL</span>
+                        <span className="val">
+                          <span className="vtext">https://xk7a9bc2.api.local.etalbaas.dev/rest</span>
+                          <button className="icon-btn" title="Copy" aria-label="Copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></button>
+                        </span>
+                      </div>
+                      <div className="conn-row">
+                        <span className="label">Anon Key</span>
+                        <span className="val">
+                          <span className="vtext masked">eyJhbGciOi••••••••••••••••</span>
+                          <button className="icon-btn" title="Show / hide" aria-label="Toggle visibility"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg></button>
+                          <button className="icon-btn" title="Copy" aria-label="Copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></button>
+                        </span>
+                      </div>
+                      <div className="conn-row">
+                        <span className="label">Service Role</span>
+                        <span className="val">
+                          <span className="vtext masked">eyJhbGciOi••••••••••••••••</span>
+                          <button className="icon-btn" title="Show / hide" aria-label="Toggle visibility"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg></button>
+                          <button className="icon-btn" title="Copy" aria-label="Copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></button>
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Connection pooling */}
+                    <div className="conn-panel">
+                      <div className="conn-panel-head">
+                        <div>
+                          <h3>Connection pooling</h3>
+                          <span className="sub">Use the pooler endpoint for serverless and short-lived connections.</span>
+                        </div>
+                        <span className="badge-info">PgBouncer</span>
+                      </div>
+                      <div className="conn-row">
+                        <span className="label">Mode</span>
+                        <span className="val"><span className="vtext">Transaction</span></span>
+                      </div>
+                      <div className="conn-row">
+                        <span className="label">Pool size</span>
+                        <span className="val"><span className="vtext">100</span></span>
+                      </div>
+                      <div className="conn-row">
+                        <span className="label">Pooler host</span>
+                        <span className="val">
+                          <span className="vtext">db-pooler-rw.project-xk7a9bc2.svc:5432</span>
+                          <button className="icon-btn" title="Copy" aria-label="Copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></button>
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Quick start snippets */}
+                  <div className="quickstart-section">
+                    <h3>Quick start</h3>
+                    <details className="qs-block" open>
+                      <summary>
+                        <svg className="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
+                        <span className="label">
+                          <svg className="lang-icon" viewBox="0 0 24 24" fill="none" stroke="#fcd34d" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>
+                          JavaScript <span style={{ color: "var(--fg-mute)", fontWeight: 400, fontSize: "11.5px" }}>— Supabase Client</span>
+                        </span>
+                        <button className="copy-btn">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                          Copy
+                        </button>
+                      </summary>
+                      <pre><span className="tok-kw">import</span>{" { createClient } "}<span className="tok-kw">from</span>{" "}<span className="tok-str">{`'@supabase/supabase-js'`}</span>{"\n\n"}<span className="tok-kw">const</span>{" supabase = "}<span className="tok-fn">createClient</span>{"(\n  "}<span className="tok-str">{`'https://xk7a9bc2.api.local.etalbaas.dev'`}</span>{",\n  "}<span className="tok-str">{`'your-anon-key'`}</span>{"\n)\n\n"}<span className="tok-kw">const</span>{" { data, error } = "}<span className="tok-kw">await</span>{" supabase\n  ."}<span className="tok-fn">from</span>{"("}<span className="tok-str">{`'profiles'`}</span>{")\n  ."}<span className="tok-fn">select</span>{"("}<span className="tok-str">{`'*'`}</span>{")\n  ."}<span className="tok-fn">eq</span>{"("}<span className="tok-str">{`'role'`}</span>{", "}<span className="tok-str">{`'admin'`}</span>{")"}</pre>
+                    </details>
+                    <details className="qs-block">
+                      <summary>
+                        <svg className="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
+                        <span className="label">
+                          <svg className="lang-icon" viewBox="0 0 24 24" fill="none" stroke="#93c5fd" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>
+                          Python <span style={{ color: "var(--fg-mute)", fontWeight: 400, fontSize: "11.5px" }}>— psycopg2</span>
+                        </span>
+                        <button className="copy-btn">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                          Copy
+                        </button>
+                      </summary>
+                      <pre><span className="tok-kw">import</span>{" psycopg2\n\nconn = psycopg2."}<span className="tok-fn">connect</span>{"(\n    host="}<span className="tok-str">{`"xk7a9bc2.db.local.etalbaas.dev"`}</span>{",\n    port="}<span className="tok-num">5432</span>{",\n    dbname="}<span className="tok-str">{`"postgres"`}</span>{",\n    user="}<span className="tok-str">{`"app"`}</span>{",\n    password="}<span className="tok-str">{`"your-password"`}</span>{",\n    sslmode="}<span className="tok-str">{`"require"`}</span>{",\n)\ncur = conn."}<span className="tok-fn">cursor</span>{"()\ncur."}<span className="tok-fn">execute</span>{"("}<span className="tok-str">{`"SELECT id, email FROM public.profiles LIMIT 10"`}</span>{")\n"}<span className="tok-kw">for</span>{" row "}<span className="tok-kw">in</span>{" cur."}<span className="tok-fn">fetchall</span>{"():\n    "}<span className="tok-fn">print</span>{"(row)"}</pre>
+                    </details>
+                    <details className="qs-block">
+                      <summary>
+                        <svg className="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>
+                        <span className="label">
+                          <svg className="lang-icon" viewBox="0 0 24 24" fill="none" stroke="#86efac" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>
+                          psql <span style={{ color: "var(--fg-mute)", fontWeight: 400, fontSize: "11.5px" }}>— command line</span>
+                        </span>
+                        <button className="copy-btn">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                          Copy
+                        </button>
+                      </summary>
+                      <pre>{"psql "}<span className="tok-str">{`"postgresql://app:****@xk7a9bc2.db.local.etalbaas.dev:5432/postgres?sslmode=require"`}</span></pre>
+                    </details>
+                  </div>
+                </>
+              )}
             </>
           )}
 
@@ -573,22 +1361,22 @@ export default function ProjectDetailPage() {
                     <div className="actions"><button className="btn btn-primary" onClick={() => setDeployFnModalOpen(true)}><IconRocket />Deploy Function<span className="kbd-inline">D</span></button></div>
                   </header>
                   <div className="pd-filters">
-                    <label className="search-input"><IconSearch /><input type="text" placeholder="Search functions\u2026" aria-label="Search functions" /><span className="kbd-hint">/</span></label>
-                    <div className="select-wrap"><select aria-label="Kind filter"><option>All kinds</option><option>Heavy Job</option><option>Heavy Deploy</option><option>Light Deploy</option></select></div>
-                    <div className="select-wrap"><select aria-label="Status filter"><option>All statuses</option><option>Ready</option><option>Building</option><option>Pending</option><option>Failed</option></select></div>
+                    <label className="search-input"><IconSearch /><input type="text" placeholder={"Search functions\u2026"} aria-label="Search functions" value={fnSearch} onChange={(e) => setFnSearch(e.target.value)} /><span className="kbd-hint">/</span></label>
+                    <div className="select-wrap"><select aria-label="Kind filter" value={fnKindFilter} onChange={(e) => setFnKindFilter(e.target.value)}><option value="">All kinds</option><option value="heavy-job">Heavy Job</option><option value="heavy-deployment">Heavy Deploy</option><option value="light-deployment">Light Deploy</option></select></div>
+                    <div className="select-wrap"><select aria-label="Status filter" value={fnStatusFilter} onChange={(e) => setFnStatusFilter(e.target.value)}><option value="">All statuses</option><option value="ready">Ready</option><option value="building">Building</option><option value="pending">Pending</option><option value="failed">Failed</option></select></div>
                   </div>
                   <div className="panel">
                     <div className="fn-table" role="table">
                       <div className="row header" role="row">
-                        <input type="checkbox" className="checkbox" aria-label="Select all" />
-                        <button className="sortable sorted">Name <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9"/></svg></button>
+                        <input type="checkbox" className="checkbox" aria-label="Select all" checked={filteredFunctions.length > 0 && filteredFunctions.every(fn => selectedFnNames.has(fn.name))} onChange={(e) => { if (e.target.checked) setSelectedFnNames(new Set(filteredFunctions.map(fn => fn.name))); else setSelectedFnNames(new Set()); }} />
+                        <button className="sortable sorted" onClick={() => setFnSortAsc(!fnSortAsc)}>Name <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ transform: fnSortAsc ? "rotate(0)" : "rotate(180deg)", transition: "transform .15s" }}><polyline points="6 9 12 15 18 9"/></svg></button>
                         <span>Kind</span><span>Mode</span><span>Status</span><span>Triggers</span><span>Last built</span><span style={{ textAlign: "right" }}>Actions</span>
                       </div>
-                      {functions?.map(fn => (
+                      {filteredFunctions.map(fn => (
                         <div key={fn.name} className={`row body-row ${fn.status === "failed" ? "failed-row" : ""}`} role="row" tabIndex={0} onClick={() => router.push(`/projects/${projectId}/functions/${fn.id}`)} style={{ cursor: "pointer" }}>
-                          <input type="checkbox" className="checkbox row-check" aria-label="Select function" />
+                          <input type="checkbox" className="checkbox row-check" aria-label="Select function" checked={selectedFnNames.has(fn.name)} onChange={(e) => { e.stopPropagation(); const next = new Set(selectedFnNames); if (e.target.checked) next.add(fn.name); else next.delete(fn.name); setSelectedFnNames(next); }} />
                           <div className="cell-name"><span className="nm">{fn.name}</span><span className="disp">{fn.displayName || fn.name}</span></div>
-                          <span className={`kind-badge ${fn.kind === "heavy_job" ? "heavy-job" : fn.kind === "heavy_deployment" ? "heavy-deployment" : "light-deployment"}`}><span className="dt" />{fn.kind === "heavy_job" ? "Heavy Job" : fn.kind === "heavy_deployment" ? "Heavy Deploy" : "Light Deploy"}</span>
+                          <span className={`kind-badge ${fn.kind === "heavy-job" ? "heavy-job" : fn.kind === "heavy-deployment" ? "heavy-deployment" : "light-deployment"}`}><span className="dt" />{fn.kind === "heavy-job" ? "Heavy Job" : fn.kind === "heavy-deployment" ? "Heavy Deploy" : "Light Deploy"}</span>
                           <span className="mode-cell">{fn.mode || "async"}</span>
                           <span className="status-cell"><span className={`badge-s ${fn.status === "ready" ? "delivered" : fn.status === "building" ? "created" : fn.status === "failed" ? "failed" : "retrying"}`} style={{ fontWeight: 500 }}><span className="bd" style={{ width: 6, height: 6, borderRadius: "50%", background: "currentColor", display: "inline-block" }} />{fn.status.charAt(0).toUpperCase() + fn.status.slice(1)}</span></span>
                           <span className="triggers-cell"><span className="tg-mute">&mdash;</span></span>
@@ -598,7 +1386,7 @@ export default function ProjectDetailPage() {
                           <span className="actions-cell">
                             <button className="action-btn" aria-label="View logs"><IconLogs /></button>
                             <button className="action-btn" aria-label="Rebuild"><IconRefresh /></button>
-                            <button className="action-btn danger" aria-label="Delete"><IconTrash /></button>
+                            <button className="action-btn danger" aria-label="Delete" onClick={e => { e.stopPropagation(); setDeleteFnTarget({ id: fn.id, name: fn.name }); setDeleteFnModalOpen(true); }}><IconTrash /></button>
                           </span>
                         </div>
                       ))}
@@ -644,7 +1432,7 @@ export default function ProjectDetailPage() {
                 </span>
                 <label className="search-input" style={{ marginLeft: "auto" }}>
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-                  <input type="text" placeholder="Search by trace ID\u2026" className="mono" style={{ fontFamily: "'JetBrains Mono',monospace" }} aria-label="Search by trace ID" />
+                  <input type="text" placeholder={"Search by trace ID\u2026"} className="mono" style={{ fontFamily: "'JetBrains Mono',monospace" }} aria-label="Search by trace ID" />
                 </label>
               </div>
               <div className="panel">
@@ -691,7 +1479,7 @@ export default function ProjectDetailPage() {
                             </div>
                           </div>
                           {evt.payload && (
-                            <details className="payload-block">
+                            <details className="payload-block" onClick={(e) => e.stopPropagation()}>
                               <summary><svg className="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>Payload preview</summary>
                               <pre>{evt.payload}</pre>
                             </details>
@@ -722,140 +1510,144 @@ export default function ProjectDetailPage() {
               </header>
               <div className="storage-split">
                 <div className="bucket-list">
-                  {HC_BUCKETS_MOCK.map((b, i) => (
-                    <div key={b.name} className={`item ${activeBucket === i ? "active" : ""}`} onClick={() => setActiveBucket(i)}>
-                      <div className="row1"><span className="nm">{b.name}</span><span className={`access-badge ${b.access}`}>{b.access}</span></div>
-                      <span className="meta">{b.meta}</span>
+                  {(buckets ?? []).map((b, i) => (
+                    <div key={b.id} className={`item ${activeBucketIdx === i ? "active" : ""}`} onClick={() => { setActiveBucketIdx(i); setSelectedObject(null); setFileDetailOpen(false); setStorSearch(""); }}>
+                      <div className="row1"><span className="nm">{b.name}</span><span className={`access-badge ${b.accessLevel}`}>{b.accessLevel}</span></div>
+                      <span className="meta">{b.createdAt ? formatRelative(b.createdAt) : ""}</span>
                     </div>
                   ))}
                   <button className="create"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ width: 13, height: 13 }}><path d="M12 5v14M5 12h14"/></svg> Create bucket</button>
                 </div>
                 <div className="file-browser">
-                  <div className="browser-head">
-                    <div className="left">
-                      <span className="bkt-name">{HC_BUCKETS_MOCK[activeBucket].name}</span>
-                      <span className={`access-badge ${HC_BUCKETS_MOCK[activeBucket].access}`}>{HC_BUCKETS_MOCK[activeBucket].access}</span>
-                      <span className="pill-meta">50 MB max</span>
-                      <span className="pill-meta">image/*, video/*</span>
-                    </div>
-                    <div className="actions">
-                      <button className="btn btn-ghost" onClick={() => setUploadOverlayOpen(true)}>
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ width: 14, height: 14 }}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-                        Upload
-                      </button>
-                      <button className="icon-only-btn" aria-label="Bucket settings">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.86l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.86-.34 1.7 1.7 0 0 0-1.04 1.56V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 9 19.4a1.7 1.7 0 0 0-1.86.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.56-1.04H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.34-1.86l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6c.43-.18.72-.6.72-1.06V3a2 2 0 1 1 4 0v.09c0 .46.29.88.72 1.06a1.7 1.7 0 0 0 1.86-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9c.18.43.6.72 1.06.72H21a2 2 0 1 1 0 4h-.09A1.7 1.7 0 0 0 19.4 15z"/></svg>
-                      </button>
-                    </div>
-                  </div>
-                  <div className="browser-crumbs">
-                    <a>{HC_BUCKETS_MOCK[activeBucket].name}</a><span className="sep">/</span><a>images</a><span className="sep">/</span><span className="here">products</span>
-                  </div>
-                  <div className="browser-tools">
-                    <label className="search-input"><IconSearch /><input type="text" placeholder="Search files\u2026" aria-label="Search files" /><span className="kbd-hint">/</span></label>
-                    <div className="view-toggle" role="tablist" aria-label="View mode">
-                      <button className={storView === "list" ? "on" : ""} onClick={() => setStorView("list")} aria-label="List view">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><circle cx="4" cy="6" r="0.8" fill="currentColor"/><circle cx="4" cy="12" r="0.8" fill="currentColor"/><circle cx="4" cy="18" r="0.8" fill="currentColor"/></svg>
-                      </button>
-                      <button className={storView === "grid" ? "on" : ""} onClick={() => setStorView("grid")} aria-label="Grid view">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
-                      </button>
-                    </div>
-                    <div className="select-wrap"><select aria-label="Sort by"><option>Name</option><option>Size</option><option>Modified</option><option>Type</option></select></div>
-                  </div>
-                  {/* LIST VIEW */}
-                  {storView === "list" && (
-                    <div className="file-table">
-                      <div className="row header"><span></span><span></span><span>Name</span><span>Size</span><span>Type</span><span>Modified</span><span style={{ textAlign: "right" }}>Actions</span></div>
-                      {HC_FILES_LIST.map(f => (
-                        <div key={f.file} className="row body-row" onClick={() => { if (!f.folder) setFileDetailOpen(true); }}>
-                          <input type="checkbox" className="checkbox" aria-label="Select" onClick={e => e.stopPropagation()} />
-                          {f.folder ? (
-                            <span className="file-icon folder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></span>
-                          ) : f.iconCls === "thumb" ? (
-                            <span className="file-icon thumb"></span>
-                          ) : f.iconCls === "thumb green" ? (
-                            <span className="file-icon thumb green"></span>
-                          ) : f.iconCls === "doc" ? (
-                            <span className="file-icon doc"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></span>
-                          ) : f.iconCls === "video" ? (
-                            <span className="file-icon video"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg></span>
-                          ) : (
-                            <span className="file-icon archive"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg></span>
-                          )}
-                          <span className={`file-name ${f.folder ? "folder" : ""}`}>{f.file}{f.folder && <span className="sub">{f.sub}</span>}</span>
-                          <span className={`file-size ${f.sizeEmpty ? "no-val" : ""}`}>{f.size}</span>
-                          <span className="file-type">{f.type}</span>
-                          <span className="file-mod">{f.mod}</span>
-                          <span className="file-actions">
-                            <button className="action-btn" aria-label="Download"><IconDownload /></button>
-                            {f.hasUrl && <button className="action-btn" aria-label="Copy URL"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.72-1.71"/></svg></button>}
-                            <button className="action-btn danger" aria-label="Delete"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/></svg></button>
-                          </span>
+                  {activeBucketData ? (
+                    <>
+                      <div className="browser-head">
+                        <div className="left">
+                          <span className="bkt-name">{activeBucketData.name}</span>
+                          <span className={`access-badge ${activeBucketData.accessLevel}`}>{activeBucketData.accessLevel}</span>
+                          {activeBucketData.fileSizeLimit > 0 && <span className="pill-meta">{Math.round(activeBucketData.fileSizeLimit / 1048576)} MB max</span>}
+                          {activeBucketData.allowedMimeTypes?.length > 0 && <span className="pill-meta">{activeBucketData.allowedMimeTypes.join(", ")}</span>}
                         </div>
-                      ))}
-                    </div>
-                  )}
-                  {/* GRID VIEW */}
-                  {storView === "grid" && (
-                    <div className="file-grid">
-                      {HC_FILES_GRID.map(f => (
-                        <div key={f.file} className={`grid-tile ${f.folder ? "folder" : ""}`} onClick={() => { if (!f.folder) setFileDetailOpen(true); }}>
-                          <div className={`preview ${f.previewCls}`}>
-                            {f.folder ? (
-                              <svg className="ph-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-                            ) : (f as any).docIcon ? (
-                              <><svg className="ph-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ color: "var(--warn)" }}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg><span className="size-tag">{f.sizeBadge}</span></>
-                            ) : (f as any).videoIcon ? (
-                              <><svg className="ph-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ color: "#fff", zIndex: 1 }}><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg><span className="size-tag">{f.sizeBadge}</span></>
-                            ) : (f as any).archiveIcon ? (
-                              <><svg className="ph-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg><span className="size-tag">{f.sizeBadge}</span></>
-                            ) : f.sizeBadge ? (
-                              <span className="size-tag">{f.sizeBadge}</span>
-                            ) : null}
+                        <div className="actions">
+                          <input type="file" ref={fileInputRef} style={{ display: "none" }} multiple onChange={e => { if (e.target.files?.length) { handleFileUpload(e.target.files); setUploadOverlayOpen(true); } }} />
+                          <button className="btn btn-ghost" onClick={() => { setUploadOverlayOpen(true); fileInputRef.current?.click(); }}>
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ width: 14, height: 14 }}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                            Upload
+                          </button>
+                          <button className="icon-only-btn" aria-label="Bucket settings">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.86l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.86-.34 1.7 1.7 0 0 0-1.04 1.56V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 9 19.4a1.7 1.7 0 0 0-1.86.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.56-1.04H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.34-1.86l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6c.43-.18.72-.6.72-1.06V3a2 2 0 1 1 4 0v.09c0 .46.29.88.72 1.06a1.7 1.7 0 0 0 1.86-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9c.18.43.6.72 1.06.72H21a2 2 0 1 1 0 4h-.09A1.7 1.7 0 0 0 19.4 15z"/></svg>
+                          </button>
+                        </div>
+                      </div>
+                      <div className="browser-crumbs">
+                        <span className="here">{activeBucketData.name}</span>
+                      </div>
+                      <div className="browser-tools">
+                        <label className="search-input"><IconSearch /><input type="text" placeholder={"Search files\u2026"} aria-label="Search files" value={storSearch} onChange={e => setStorSearch(e.target.value)} /><span className="kbd-hint">/</span></label>
+                        <div className="view-toggle" role="tablist" aria-label="View mode">
+                          <button className={storView === "list" ? "on" : ""} onClick={() => setStorView("list")} aria-label="List view">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><circle cx="4" cy="6" r="0.8" fill="currentColor"/><circle cx="4" cy="12" r="0.8" fill="currentColor"/><circle cx="4" cy="18" r="0.8" fill="currentColor"/></svg>
+                          </button>
+                          <button className={storView === "grid" ? "on" : ""} onClick={() => setStorView("grid")} aria-label="Grid view">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+                          </button>
+                        </div>
+                        <div className="select-wrap"><select aria-label="Sort by"><option>Name</option><option>Size</option><option>Modified</option><option>Type</option></select></div>
+                      </div>
+                      {objectsLoading && <div style={{ padding: 24, textAlign: "center", color: "var(--fg-mute)" }}>Loading objects...</div>}
+                      {!objectsLoading && filteredObjects.length === 0 && (
+                        <div style={{ padding: 48, textAlign: "center", color: "var(--fg-mute)" }}>
+                          {storSearch ? "No files match your search." : "This bucket is empty."}
+                          {!storSearch && <div style={{ marginTop: 12 }}><button className="btn btn-ghost" onClick={() => fileInputRef.current?.click()}>Upload files</button></div>}
+                        </div>
+                      )}
+                      {/* LIST VIEW */}
+                      {!objectsLoading && filteredObjects.length > 0 && storView === "list" && (
+                        <div className="file-table">
+                          <div className="row header"><span></span><span></span><span>Name</span><span>Size</span><span>Type</span><span>Modified</span><span style={{ textAlign: "right" }}>Actions</span></div>
+                          {filteredObjects.map(obj => (
+                            <div key={obj.id} className="row body-row" onClick={() => { setSelectedObject(obj); setFileDetailOpen(true); }}>
+                              <input type="checkbox" className="checkbox" aria-label="Select" onClick={e => e.stopPropagation()} />
+                              <span className="file-icon doc"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></span>
+                              <span className="file-name">{obj.name}</span>
+                              <span className="file-size">{obj.size != null ? (obj.size > 1048576 ? `${(obj.size / 1048576).toFixed(1)} MB` : obj.size > 1024 ? `${(obj.size / 1024).toFixed(0)} KB` : `${obj.size} B`) : "\u2014"}</span>
+                              <span className="file-type">{obj.mime_type || "\u2014"}</span>
+                              <span className="file-mod">{obj.updated_at ? formatRelative(obj.updated_at) : "\u2014"}</span>
+                              <span className="file-actions">
+                                <button className="action-btn" aria-label="Download" onClick={e => { e.stopPropagation(); handleFileDownload(obj.name); }}><IconDownload /></button>
+                                <button className="action-btn" aria-label="Copy URL" onClick={e => { e.stopPropagation(); navigator.clipboard.writeText(`${activeBucketData.name}/${obj.name}`); }}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.72-1.71"/></svg></button>
+                                <button className="action-btn danger" aria-label="Delete" onClick={e => { e.stopPropagation(); handleFileDelete(obj.name); }}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/></svg></button>
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {/* GRID VIEW */}
+                      {!objectsLoading && filteredObjects.length > 0 && storView === "grid" && (
+                        <div className="file-grid active">
+                          {filteredObjects.map(obj => (
+                            <div key={obj.id} className="grid-tile" onClick={() => { setSelectedObject(obj); setFileDetailOpen(true); }}>
+                              <div className="preview">
+                                <svg className="ph-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                                {obj.size != null && <span className="size-tag">{obj.size > 1048576 ? `${(obj.size / 1048576).toFixed(1)} MB` : obj.size > 1024 ? `${(obj.size / 1024).toFixed(0)} KB` : `${obj.size} B`}</span>}
+                              </div>
+                              <div className="meta"><div className="nm">{obj.name}</div></div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {/* Upload overlay */}
+                      {uploadOverlayOpen && (
+                        <div className="upload-overlay show">
+                          <button className="close-btn" onClick={() => { setUploadOverlayOpen(false); setUploadFiles([]); }} aria-label="Close upload">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ width: 14, height: 14 }}><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                          </button>
+                          <div className="drop" onClick={() => fileInputRef.current?.click()} style={{ cursor: "pointer" }}>
+                            <span className="cloud"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M16 16l-4-4-4 4"/><path d="M12 12v9"/><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/><polyline points="16 16 12 12 8 16"/></svg></span>
+                            <h3>Drop files here or click to browse</h3>
+                            <p>{activeBucketData.fileSizeLimit > 0 ? `Max file size: ${Math.round(activeBucketData.fileSizeLimit / 1048576)} MB` : "No file size limit"}{activeBucketData.allowedMimeTypes?.length > 0 ? ` \u00b7 Allowed types: ${activeBucketData.allowedMimeTypes.join(", ")}` : ""}</p>
                           </div>
-                          <div className="meta"><div className="nm">{f.file}</div></div>
+                          {uploadFiles.length > 0 && (
+                            <div className="progress-list">
+                              {uploadFiles.map((uf, i) => (
+                                <div key={i} className="prog-row">
+                                  <span className="file-icon doc" style={{ width: 22, height: 22 }}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ width: 11, height: 11 }}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></span>
+                                  <span className="nm">{uf.file.name}</span>
+                                  <span className="bar"><i style={{ width: uf.status === "done" ? "100%" : uf.status === "error" ? "100%" : "50%", background: uf.status === "done" ? "var(--ok)" : uf.status === "error" ? "var(--err)" : undefined }}></i></span>
+                                  <span className="pct" style={{ color: uf.status === "done" ? "var(--ok)" : uf.status === "error" ? "var(--err)" : undefined }}>{uf.status === "done" ? "Done" : uf.status === "error" ? "Error" : "Uploading..."}</span>
+                                  <span></span>
+                                  <span className="sz" style={{ gridColumn: "2/3", gridRow: 1, justifySelf: "end" }}>{uf.file.size > 1048576 ? `${(uf.file.size / 1048576).toFixed(1)} MB` : `${(uf.file.size / 1024).toFixed(0)} KB`}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
                         </div>
-                      ))}
-                    </div>
-                  )}
-                  {/* Upload overlay */}
-                  {uploadOverlayOpen && (
-                    <div className="upload-overlay">
-                      <button className="close-btn" onClick={() => setUploadOverlayOpen(false)} aria-label="Close upload">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ width: 14, height: 14 }}><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-                      </button>
-                      <div className="drop">
-                        <span className="cloud"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M16 16l-4-4-4 4"/><path d="M12 12v9"/><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/><polyline points="16 16 12 12 8 16"/></svg></span>
-                        <h3>Drop files here or click to browse</h3>
-                        <p>Max file size: 50 MB &middot; Allowed types: image/*, video/*</p>
-                      </div>
-                      <div className="progress-list">
-                        <div className="prog-row">
-                          <span className="file-icon image" style={{ width: 22, height: 22 }}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ width: 11, height: 11 }}><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></span>
-                          <span className="nm">product-hero-2026.webp</span>
-                          <span className="bar"><i style={{ width: "78%" }}></i></span>
-                          <span className="pct">78%</span>
-                          <button className="cancel" aria-label="Cancel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ width: 11, height: 11 }}><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
-                          <span className="sz" style={{ gridColumn: "2/3", gridRow: 1, justifySelf: "end" }}>3.1 MB</span>
+                      )}
+                      {/* File detail panel */}
+                      {fileDetailOpen && selectedObject && (
+                        <div className="file-detail-panel" style={{ position: "absolute", right: 0, top: 0, bottom: 0, width: 320, background: "var(--card)", borderLeft: "1px solid var(--border)", padding: 20, zIndex: 10, display: "flex", flexDirection: "column", gap: 12 }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                            <h3 style={{ margin: 0, fontSize: 14 }}>{selectedObject.name}</h3>
+                            <button className="icon-only-btn" onClick={() => { setFileDetailOpen(false); setSelectedObject(null); }} aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ width: 14, height: 14 }}><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+                          </div>
+                          <div style={{ fontSize: 12, color: "var(--fg-mute)", display: "flex", flexDirection: "column", gap: 8 }}>
+                            <div><span style={{ fontWeight: 500 }}>Size:</span> {selectedObject.size != null ? (selectedObject.size > 1048576 ? `${(selectedObject.size / 1048576).toFixed(1)} MB` : `${(selectedObject.size / 1024).toFixed(0)} KB`) : "Unknown"}</div>
+                            <div><span style={{ fontWeight: 500 }}>Type:</span> {selectedObject.mime_type || "Unknown"}</div>
+                            <div><span style={{ fontWeight: 500 }}>Modified:</span> {selectedObject.updated_at ? formatRelative(selectedObject.updated_at) : "Unknown"}</div>
+                            {selectedObject.etag && <div><span style={{ fontWeight: 500 }}>ETag:</span> <span className="mono">{selectedObject.etag}</span></div>}
+                          </div>
+                          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+                            <button className="btn btn-ghost" onClick={() => navigator.clipboard.writeText(`${activeBucketData.name}/${selectedObject.name}`)}>Copy URL</button>
+                            <button className="btn btn-ghost" onClick={() => handleFileDownload(selectedObject.name)}><IconDownload /> Download</button>
+                            <button className="btn btn-ghost" onClick={() => fileInputRef.current?.click()}>Replace</button>
+                            <button className="btn btn-ghost" style={{ color: "var(--err)" }} onClick={() => handleFileDelete(selectedObject.name)}>Delete</button>
+                          </div>
                         </div>
-                        <div className="prog-row">
-                          <span className="file-icon video" style={{ width: 22, height: 22 }}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ width: 11, height: 11 }}><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg></span>
-                          <span className="nm">walkthrough-may.mp4</span>
-                          <span className="bar"><i style={{ width: "34%" }}></i></span>
-                          <span className="pct">34%</span>
-                          <button className="cancel" aria-label="Cancel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ width: 11, height: 11 }}><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
-                          <span className="sz" style={{ gridColumn: "2/3", gridRow: 1, justifySelf: "end" }}>28.4 MB</span>
-                        </div>
-                        <div className="prog-row">
-                          <span className="file-icon image" style={{ width: 22, height: 22 }}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ width: 11, height: 11 }}><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></span>
-                          <span className="nm">og-image-spring.png</span>
-                          <span className="bar"><i style={{ width: "100%", background: "var(--ok)" }}></i></span>
-                          <span className="pct" style={{ color: "var(--ok)" }}>Done</span>
-                          <span></span>
-                          <span className="sz" style={{ gridColumn: "2/3", gridRow: 1, justifySelf: "end" }}>812 KB</span>
-                        </div>
-                      </div>
+                      )}
+                    </>
+                  ) : (
+                    <div style={{ padding: 48, textAlign: "center", color: "var(--fg-mute)" }}>
+                      {(buckets ?? []).length === 0 ? "No buckets yet. Create one to start uploading files." : "Select a bucket from the sidebar."}
                     </div>
                   )}
                 </div>
@@ -877,30 +1669,48 @@ export default function ProjectDetailPage() {
                   <button className="dismiss" onClick={() => setSecBannerDismissed(true)} aria-label="Dismiss"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
                 </div>
               )}
+              {secrets && secrets.length > 0 ? (
               <div className="panel">
-                <div className="sec-table" role="table">
-                  <div className="row header" role="row">
-                    <button className="sortable sorted" style={{ background:"none",border:0,padding:0,font:"inherit",color:"inherit",textAlign:"left",textTransform:"uppercase",letterSpacing:"0.07em",cursor:"pointer",display:"inline-flex",alignItems:"center",gap:4 }}>Name<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ width:9,height:9 }}><polyline points="6 9 12 15 18 9"/></svg></button>
-                    <span>Description</span><span>Value</span>
-                    <button className="sortable" style={{ background:"none",border:0,padding:0,font:"inherit",color:"inherit",textAlign:"left",textTransform:"uppercase",letterSpacing:"0.07em",cursor:"pointer",display:"inline-flex",alignItems:"center",gap:4 }}>Last rotated<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ width:9,height:9 }}><polyline points="8 18 12 22 16 18"/><polyline points="8 6 12 2 16 6"/></svg></button>
-                    <button className="sortable" style={{ background:"none",border:0,padding:0,font:"inherit",color:"inherit",textAlign:"left",textTransform:"uppercase",letterSpacing:"0.07em",cursor:"pointer",display:"inline-flex",alignItems:"center",gap:4 }}>Created<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ width:9,height:9 }}><polyline points="8 18 12 22 16 18"/><polyline points="8 6 12 2 16 6"/></svg></button>
-                    <span style={{ textAlign: "right" }}>Actions</span>
-                  </div>
-                  {HC_SECRETS.map(s => (
-                    <div key={s.name} className="row body-row">
-                      <span className="sec-name">{s.name}</span>
-                      <span className="sec-desc">{s.desc}</span>
-                      <span className="sec-value"><IconLock />&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;</span>
-                      <span className={`sec-when ${s.rotatedNever ? "never" : ""}`}>{s.rotated}</span>
-                      <span className="sec-when">{s.created}</span>
-                      <span className="sec-actions">
-                        <button onClick={() => { setTargetSecretName(s.name); setRotateSecretValue(""); setRotateValueRevealed(false); setRotateSecretModalOpen(true); }}>Rotate</button>
-                        <button className="danger" onClick={() => { setTargetSecretName(s.name); setDeleteSecretConfirmInput(""); setDeleteSecretModalOpen(true); }}>Delete</button>
-                      </span>
-                    </div>
-                  ))}
-                </div>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Name</th>
+                      <th>Description</th>
+                      <th>Value</th>
+                      <th>Last rotated</th>
+                      <th>Created</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {secrets.map(s => {
+                      const rotated = s.updatedAt && s.updatedAt !== s.createdAt;
+                      return (
+                        <tr key={s.id}>
+                          <td><code>{s.name}</code></td>
+                          <td><span className="sec-desc">{s.description || "\u2014"}</span></td>
+                          <td><span className="sec-value">&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;</span></td>
+                          <td>{rotated ? formatRelative(s.updatedAt) : "Never rotated"}</td>
+                          <td>{formatRelative(s.createdAt)}</td>
+                          <td>
+                            <div className="sec-actions">
+                              <button onClick={() => { setTargetSecretId(s.id); setTargetSecretName(s.name); setRotateSecretValue(""); setRotateValueRevealed(false); setRotateSecretModalOpen(true); }}>Rotate</button>
+                              <button className="danger" onClick={() => { setTargetSecretId(s.id); setTargetSecretName(s.name); setDeleteSecretConfirmInput(""); setDeleteSecretModalOpen(true); }}>Delete</button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
+              ) : (
+              <div className="fn-empty">
+                <div className="bolt"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></div>
+                <h2>No secrets configured</h2><p>Add environment variables that your functions can access at runtime.</p>
+                <button className="btn btn-primary" onClick={() => setAddSecretModalOpen(true)}><IconPlus /> Add Secret</button>
+              </div>
+              )}
             </>
           )}
 
@@ -909,7 +1719,7 @@ export default function ProjectDetailPage() {
             <>
               <header className="tab-head">
                 <div><h2>API Keys</h2><p>Authenticate requests to your project{"'"}s API.</p></div>
-                <div className="actions"><button className="btn btn-primary" onClick={() => { setCreateKeyStep(1); setCreateKeyName(""); setCreateKeyRole("anon"); setCreateKeyExp("90"); setCreateKeyModalOpen(true); }}><IconPlus /> Create Key<span className="kbd-inline">K</span></button></div>
+                {akCount > 0 && <div className="actions"><button className="btn btn-primary" onClick={() => { setCreateKeyStep(1); setCreateKeyName(""); setCreateKeyRole("anon"); setCreateKeyExp("90"); setCreateKeyModalOpen(true); }}><IconPlus /> Create Key<span className="kbd-inline">K</span></button></div>}
               </header>
               <div className="role-cards">
                 <div className="role-card anon">
@@ -921,31 +1731,36 @@ export default function ProjectDetailPage() {
                   <div className="body"><div className="top"><span className="label">service_role</span></div><p className="desc">Full access, bypasses RLS. Use only in server-side environments.</p><span className="note">Never expose in client-side code</span></div>
                 </div>
               </div>
+              {activeApiKeys && activeApiKeys.length > 0 ? (
               <div className="panel">
                 <div className="ak-table" role="table">
                   <div className="row header" role="row">
-                    <button className="sortable sorted" style={{ background:"none",border:0,padding:0,font:"inherit",color:"inherit",textAlign:"left",textTransform:"uppercase",letterSpacing:"0.07em",cursor:"pointer",display:"inline-flex",alignItems:"center",gap:4 }}>Name<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ width:9,height:9 }}><polyline points="6 9 12 15 18 9"/></svg></button>
+                    <span>Name</span>
                     <span>Prefix</span>
-                    <button className="sortable" style={{ background:"none",border:0,padding:0,font:"inherit",color:"inherit",textAlign:"left",textTransform:"uppercase",letterSpacing:"0.07em",cursor:"pointer",display:"inline-flex",alignItems:"center",gap:4 }}>Role<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ width:9,height:9 }}><polyline points="8 18 12 22 16 18"/><polyline points="8 6 12 2 16 6"/></svg></button>
-                    <button className="sortable" style={{ background:"none",border:0,padding:0,font:"inherit",color:"inherit",textAlign:"left",textTransform:"uppercase",letterSpacing:"0.07em",cursor:"pointer",display:"inline-flex",alignItems:"center",gap:4 }}>Created<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ width:9,height:9 }}><polyline points="8 18 12 22 16 18"/><polyline points="8 6 12 2 16 6"/></svg></button>
-                    <button className="sortable" style={{ background:"none",border:0,padding:0,font:"inherit",color:"inherit",textAlign:"left",textTransform:"uppercase",letterSpacing:"0.07em",cursor:"pointer",display:"inline-flex",alignItems:"center",gap:4 }}>Expires<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ width:9,height:9 }}><polyline points="8 18 12 22 16 18"/><polyline points="8 6 12 2 16 6"/></svg></button>
-                    <span>Status</span><span style={{ textAlign: "right" }}>Actions</span>
+                    <span>Role</span>
+                    <span>Created</span>
+                    <span style={{ textAlign: "right" }}>Actions</span>
                   </div>
-                  {HC_APIKEYS.map(k => (
-                    <div key={k.prefix} className={`row body-row ${k.rowCls}`} role="row">
+                  {activeApiKeys.map(k => (
+                    <div key={k.id} className={`row body-row`} role="row">
                       <span className="ak-name">{k.name}</span>
-                      <span className="ak-prefix">{k.prefix}<CopyBtn text={k.prefix} /></span>
+                      <span className="ak-prefix">{k.keyPrefix}<CopyBtn text={k.keyPrefix} /></span>
                       <span><span className={`role-badge ${k.role === "anon" ? "anon" : "svc"}`}>{k.role}</span></span>
-                      <span className="ak-when">{k.created}</span>
-                      <span className={`ak-expire ${k.expCls}`}>{k.expires}</span>
-                      <span className={`ak-status ${k.status}`}><span className="dt" />{k.status === "revoked" ? "Revoked" : "Active"}</span>
+                      <span className="ak-when">{formatRelative(k.createdAt)}</span>
                       <span className="ak-actions">
-                        {k.status !== "revoked" && <button onClick={() => { setRevokeKeyName(k.name); setRevokeKeyPrefix(k.prefix); setRevokeKeyRole(k.role); setRevokeConfirmInput(""); setRevokeKeyModalOpen(true); }}>Revoke</button>}
+                        <button onClick={() => { setRevokeKeyId(k.id); setRevokeKeyName(k.name); setRevokeKeyPrefix(k.keyPrefix); setRevokeKeyRole(k.role); setRevokeConfirmInput(""); setRevokeKeyModalOpen(true); }}>Revoke</button>
                       </span>
                     </div>
                   ))}
                 </div>
               </div>
+              ) : (
+              <div className="fn-empty">
+                <div className="bolt"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></div>
+                <h2>No API keys</h2><p>Create API keys to authenticate requests to your project{"'"}s endpoints.</p>
+                <button className="btn btn-primary" onClick={() => { setCreateKeyStep(1); setCreateKeyName(""); setCreateKeyRole("anon"); setCreateKeyExp("90"); setCreateKeyModalOpen(true); }}><IconPlus /> Create Key</button>
+              </div>
+              )}
             </>
           )}
 
@@ -957,8 +1772,8 @@ export default function ProjectDetailPage() {
                 <div className="stg-panel" id="stg-general">
                   <div className="stg-panel-head"><h3>Project information</h3><p className="sub">Basic information about your project.</p></div>
                   <div className="stg-panel-body">
-                    <div className="stg-field"><label>Display name</label><input type="text" defaultValue={displayName} maxLength={100} /><span className="helper">Used in the dashboard and notifications.</span></div>
-                    <div className="stg-field"><label>Description</label><div className="counter-wrap"><textarea defaultValue={description} maxLength={500} /><span className="char-counter">{description.length} / 500</span></div></div>
+                    <div className="stg-field"><label>Display name</label><input type="text" key={`dn-${project?.displayName}`} defaultValue={displayName} maxLength={100} /><span className="helper">Used in the dashboard and notifications.</span></div>
+                    <div className="stg-field"><label>Description</label><div className="counter-wrap"><textarea key={`desc-${project?.description}`} defaultValue={description} maxLength={500} /><span className="char-counter">{description.length} / 500</span></div></div>
                     <div className="stg-field"><label>Project ID</label><div className="readonly-wrap"><input type="text" className="mono" value={projectId} readOnly /><button className="copy" onClick={() => navigator.clipboard.writeText(projectId)}><IconCopy /></button></div><span className="helper">Cannot be changed. Used as subdomain for API endpoints.</span></div>
                   </div>
                   <div className="stg-panel-foot"><button className="btn btn-ghost">Reset</button><button className="btn btn-primary" disabled>Save Changes</button></div>
@@ -982,7 +1797,7 @@ export default function ProjectDetailPage() {
                 <div className="danger-panel" id="stg-danger">
                   <div className="stg-panel-head"><h3>Danger zone</h3><p className="sub">Irreversible operations on this project.</p></div>
                   <div className="stg-panel-body">
-                    <div className="danger-row"><div className="info"><div className="ttl">Pause project</div><div className="sub">Temporarily stop all services. Data is preserved but endpoints become unavailable.</div></div><div className="right-actions"><button className="btn btn-warn" onClick={() => setPauseModalOpen(true)}>Pause Project</button></div></div>
+                    <div className="danger-row"><div className="info"><div className="ttl">{status === "paused" ? "Resume project" : "Pause project"}</div><div className="sub">{status === "paused" ? "Resume all services. Data has been preserved." : "Temporarily stop all services. Data is preserved but endpoints become unavailable."}</div></div><div className="right-actions"><button className="btn btn-warn" onClick={() => setPauseModalOpen(true)}>{status === "paused" ? "Resume Project" : "Pause Project"}</button></div></div>
                     <div className="danger-row"><div className="info"><div className="ttl">Transfer ownership</div><div className="sub">Transfer this project to another tenant.</div></div><div className="right-actions"><span className="coming-soon">Coming soon</span><button className="btn btn-ghost" disabled>Transfer</button></div></div>
                     <div className="danger-row"><div className="info"><div className="ttl err">Delete project</div><div className="sub">Permanently delete this project and <strong style={{ color: "var(--err)" }}>all its data</strong>. This cannot be undone.</div></div><div className="right-actions"><button className="btn btn-danger" onClick={() => setDeleteProjectModalOpen(true)}>Delete Project</button></div></div>
                   </div>
@@ -1001,27 +1816,29 @@ export default function ProjectDetailPage() {
         <div className="modal-scrim open" role="dialog" aria-modal="true" onClick={() => setPauseModalOpen(false)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
             <div className="modal-head">
-              <h3>Pause project</h3>
+              <h3>{status === "paused" ? "Resume project" : "Pause project"}</h3>
               <button className="close" onClick={() => setPauseModalOpen(false)} aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ width:14,height:14 }}><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
             </div>
             <div className="modal-body">
               <div className="modal-warn">
                 <span className="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg></span>
-                <p>All services will be stopped. Your data (database, storage, secrets) will be <strong>preserved</strong>. You can resume at any time.</p>
+                <p>{status === "paused" ? "All services will be restarted." : <>All services will be stopped. Your data (database, storage, secrets) will be <strong>preserved</strong>. You can resume at any time.</>}</p>
               </div>
+              {status !== "paused" && (
               <div className="panel" style={{ padding:"14px 16px",borderRadius:10,fontSize:"12.5px" }}>
                 <span style={{ fontSize:11,color:"var(--fg-mute)",textTransform:"uppercase",letterSpacing:"0.06em" }}>Currently running</span>
                 <div style={{ marginTop:6,display:"flex",gap:6,flexWrap:"wrap" }}>
-                  <span className="role-badge" style={{ color:"var(--ok)",background:"rgba(134,239,172,0.08)",borderColor:"rgba(134,239,172,0.22)" }}>PostgreSQL</span>
-                  <span className="role-badge" style={{ color:"var(--ok)",background:"rgba(134,239,172,0.08)",borderColor:"rgba(134,239,172,0.22)" }}>Redis</span>
-                  <span className="role-badge" style={{ color:"var(--ok)",background:"rgba(134,239,172,0.08)",borderColor:"rgba(134,239,172,0.22)" }}>PostgREST</span>
-                  <span className="role-badge" style={{ color:"var(--accent)",background:"var(--accent-soft)",borderColor:"rgba(196,181,253,0.22)" }}>5 Functions</span>
+                  {project?.postgresEnabled && <span className="role-badge" style={{ color:"var(--ok)",background:"rgba(134,239,172,0.08)",borderColor:"rgba(134,239,172,0.22)" }}>PostgreSQL</span>}
+                  {project?.redisEnabled && <span className="role-badge" style={{ color:"var(--ok)",background:"rgba(134,239,172,0.08)",borderColor:"rgba(134,239,172,0.22)" }}>Redis</span>}
+                  {project?.postgrestEnabled && <span className="role-badge" style={{ color:"var(--ok)",background:"rgba(134,239,172,0.08)",borderColor:"rgba(134,239,172,0.22)" }}>PostgREST</span>}
+                  {fnCount > 0 && <span className="role-badge" style={{ color:"var(--accent)",background:"var(--accent-soft)",borderColor:"rgba(196,181,253,0.22)" }}>{fnCount} Functions</span>}
                 </div>
               </div>
+              )}
             </div>
             <div className="modal-foot">
               <button className="btn btn-ghost" onClick={() => setPauseModalOpen(false)}>Cancel</button>
-              <button className="btn btn-warn" style={{ borderColor:"rgba(252,211,77,0.5)" }}>Pause Project</button>
+              <button className="btn btn-warn" style={{ borderColor:"rgba(252,211,77,0.5)" }} onClick={async () => { try { if (status === "paused") { await resumeProjectMut.mutateAsync(projectId); } else { await pauseProjectMut.mutateAsync(projectId); } } catch {} finally { setPauseModalOpen(false); } }}>{status === "paused" ? "Resume" : "Pause Project"}</button>
             </div>
           </div>
         </div>
@@ -1058,7 +1875,7 @@ export default function ProjectDetailPage() {
             </div>
             <div className="modal-foot">
               <button className="btn btn-ghost" onClick={() => setDeleteProjectModalOpen(false)}>Cancel</button>
-              <button className="btn btn-danger" disabled={deleteProjectInput !== displayName || !deleteProjectAck}>Delete Project</button>
+              <button className="btn btn-danger" disabled={deleteProjectInput !== displayName || !deleteProjectAck} onClick={async () => { try { await deleteProjectMut.mutateAsync(projectId); router.push("/projects"); } catch {} finally { setDeleteProjectModalOpen(false); } }}>Delete Project</button>
             </div>
           </div>
         </div>
@@ -1073,20 +1890,17 @@ export default function ProjectDetailPage() {
               <button className="close" onClick={() => setAddSecretModalOpen(false)} aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ width:14,height:14 }}><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
             </div>
             <div className="modal-body">
-              <div className="field"><label>Name</label><input type="text" className="mono" placeholder="e.g. OPENAI_API_KEY" autoComplete="off" spellCheck={false} value={addSecretName} onChange={e => setAddSecretName(e.target.value)} /><span className="hint">UPPERCASE letters, numbers, and underscores only.</span></div>
+              <div className="field"><label>Name</label><input id="secret-name" type="text" className="mono" placeholder="e.g. OPENAI_API_KEY" autoComplete="off" spellCheck={false} value={addSecretName} onChange={e => setAddSecretName(e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, ""))} /><span className="hint">UPPERCASE letters, numbers, and underscores only.</span></div>
               <div className="field">
                 <label>Value</label>
-                <div className="value-field">
-                  <textarea className={`mono ${secValueRevealed ? "" : "masked"}`} placeholder="Paste your secret value\u2026" rows={3} autoComplete="off" spellCheck={false} value={addSecretValue} onChange={e => setAddSecretValue(e.target.value)} />
-                  <button type="button" className="reveal" onClick={() => setSecValueRevealed(!secValueRevealed)}>{secValueRevealed ? "Hide" : "Show"}</button>
-                </div>
+                <input id="secret-value" type="password" className="mono" placeholder="Paste your secret value" autoComplete="off" spellCheck={false} value={addSecretValue} onChange={e => setAddSecretValue(e.target.value)} />
                 <span className="footnote"><IconLock />This value will be encrypted and cannot be retrieved after saving.</span>
               </div>
-              <div className="field"><label>Description <span style={{ color:"var(--fg-mute)",textTransform:"none",letterSpacing:0,fontWeight:400 }}>&mdash; optional</span></label><input type="text" placeholder="What is this secret used for?" value={addSecretDesc} onChange={e => setAddSecretDesc(e.target.value)} /></div>
+              <div className="field"><label>Description <span style={{ color:"var(--fg-mute)",textTransform:"none",letterSpacing:0,fontWeight:400 }}>&mdash; optional</span></label><input id="secret-desc" type="text" placeholder="What is this secret used for?" value={addSecretDesc} onChange={e => setAddSecretDesc(e.target.value)} /></div>
             </div>
             <div className="modal-foot">
               <button className="btn btn-ghost" onClick={() => setAddSecretModalOpen(false)}>Cancel</button>
-              <button className="btn btn-primary">Add Secret</button>
+              <button className="btn btn-primary" disabled={!addSecretName || !addSecretValue} onClick={async () => { await createSecretMut.mutateAsync({ projectId, name: addSecretName, value: addSecretValue, description: addSecretDesc || undefined }); setAddSecretName(""); setAddSecretValue(""); setAddSecretDesc(""); setAddSecretModalOpen(false); }}>Add Secret</button>
             </div>
           </div>
         </div>
@@ -1097,7 +1911,7 @@ export default function ProjectDetailPage() {
         <div className="modal-scrim open" role="dialog" aria-modal="true" onClick={() => setRotateSecretModalOpen(false)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
             <div className="modal-head">
-              <h3>Rotate <span className="mono">{targetSecretName}</span></h3>
+              <h3>Rotate <code>{targetSecretName}</code></h3>
               <button className="close" onClick={() => setRotateSecretModalOpen(false)} aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ width:14,height:14 }}><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
             </div>
             <div className="modal-body">
@@ -1107,15 +1921,12 @@ export default function ProjectDetailPage() {
               </div>
               <div className="field">
                 <label>New value</label>
-                <div className="value-field">
-                  <textarea className={`mono ${rotateValueRevealed ? "" : "masked"}`} placeholder="Paste the new secret value\u2026" rows={3} autoComplete="off" spellCheck={false} value={rotateSecretValue} onChange={e => setRotateSecretValue(e.target.value)} />
-                  <button type="button" className="reveal" onClick={() => setRotateValueRevealed(!rotateValueRevealed)}>{rotateValueRevealed ? "Hide" : "Show"}</button>
-                </div>
+                <input type="password" className="mono" placeholder="Paste the new secret value" autoComplete="off" spellCheck={false} value={rotateSecretValue} onChange={e => setRotateSecretValue(e.target.value)} />
               </div>
             </div>
             <div className="modal-foot">
               <button className="btn btn-ghost" onClick={() => setRotateSecretModalOpen(false)}>Cancel</button>
-              <button className="btn btn-primary">Rotate Value</button>
+              <button className="btn btn-primary" disabled={!rotateSecretValue} onClick={async () => { await updateSecretValueMut.mutateAsync({ projectId, secretId: targetSecretId, value: rotateSecretValue }); setRotateSecretValue(""); setRotateSecretModalOpen(false); }}>Rotate Value</button>
             </div>
           </div>
         </div>
@@ -1141,7 +1952,7 @@ export default function ProjectDetailPage() {
             </div>
             <div className="modal-foot">
               <button className="btn btn-ghost" onClick={() => setDeleteSecretModalOpen(false)}>Cancel</button>
-              <button className="btn btn-danger" disabled={deleteSecretConfirmInput !== targetSecretName}>Delete Secret</button>
+              <button className="btn btn-danger" disabled={deleteSecretConfirmInput !== targetSecretName} onClick={async () => { await deleteSecretMut.mutateAsync({ projectId, secretId: targetSecretId }); setDeleteSecretModalOpen(false); }}>Delete Secret</button>
             </div>
           </div>
         </div>
@@ -1194,7 +2005,7 @@ export default function ProjectDetailPage() {
                 </div>
                 <div className="modal-foot">
                   <button className="btn btn-ghost" onClick={() => setCreateKeyModalOpen(false)}>Cancel</button>
-                  <button className="btn btn-primary" onClick={() => setCreateKeyStep(2)}>Create Key</button>
+                  <button className="btn btn-primary" disabled={!createKeyName || createApiKeyMut.isPending} onClick={async () => { const expDays = createKeyExp === "never" ? undefined : parseInt(createKeyExp); const result = await createApiKeyMut.mutateAsync({ projectId, name: createKeyName, role: createKeyRole, expiresInDays: expDays }); setCreatedRawKey(result.rawKey || ""); setCreateKeyStep(2); }}>Create Key</button>
                 </div>
               </>
             ) : (
@@ -1206,8 +2017,8 @@ export default function ProjectDetailPage() {
                 <div className="modal-body">
                   <div className="key-success">
                     <div className="head-ok"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="9 12 11 14 15 9"/></svg>Your new key is ready</div>
-                    <div className="key-block"><span className="tag">Full key</span>etbs_a1b2_R3yJ9pX2qN7vTfL5cE0wM8aZkD4sH6</div>
-                    <button className="btn btn-primary copy-full" onClick={() => navigator.clipboard.writeText("etbs_a1b2_R3yJ9pX2qN7vTfL5cE0wM8aZkD4sH6")}>
+                    <div className="key-block"><span className="tag">Full key</span>{createdRawKey}</div>
+                    <button className="btn btn-primary copy-full" onClick={() => navigator.clipboard.writeText(createdRawKey)}>
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ width:13,height:13 }}><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
                       Copy key
                     </button>
@@ -1254,7 +2065,7 @@ export default function ProjectDetailPage() {
             </div>
             <div className="modal-foot">
               <button className="btn btn-ghost" onClick={() => setRevokeKeyModalOpen(false)}>Cancel</button>
-              <button className="btn btn-danger" disabled={revokeConfirmInput !== revokeKeyName}>Revoke Key</button>
+              <button className="btn btn-danger" disabled={revokeConfirmInput !== revokeKeyName} onClick={async () => { try { await revokeApiKeyMut.mutateAsync({ projectId, keyId: revokeKeyId }); } catch {} finally { setRevokeKeyModalOpen(false); } }}>Revoke Key</button>
             </div>
           </div>
         </div>
@@ -1618,6 +2429,109 @@ export default function ProjectDetailPage() {
         </div>
       )}
 
+      {/* ===== DB Modals ===== */}
+      {newTableModalOpen && (
+        <div className="modal-overlay" onClick={() => setNewTableModalOpen(false)}>
+          <div className="modal-box" onClick={e => e.stopPropagation()}>
+            <h3>New Table</h3>
+            <div className="modal-field">
+              <label>Table name</label>
+              <input type="text" value={newTableName} onChange={e => setNewTableName(e.target.value)} placeholder="e.g. users" autoFocus />
+            </div>
+            <div className="modal-actions">
+              <button className="btn btn-ghost" onClick={() => setNewTableModalOpen(false)}>Cancel</button>
+              <button className="btn btn-primary" disabled={!newTableName.trim() || createTableMut.isPending} onClick={() => {
+                createTableMut.mutate({ name: newTableName.trim(), schema: "public" }, {
+                  onSuccess: (table) => { setNewTableModalOpen(false); setSelectedTableId(table.id); },
+                });
+              }}>{createTableMut.isPending ? "Creating..." : "Create Table"}</button>
+            </div>
+            {createTableMut.isError && <div style={{ color: "var(--err)", fontSize: 12, marginTop: 8 }}>{createTableMut.error?.message}</div>}
+          </div>
+        </div>
+      )}
+
+      {addColumnModalOpen && (
+        <div className="modal-overlay" onClick={() => setAddColumnModalOpen(false)}>
+          <div className="modal-box" onClick={e => e.stopPropagation()}>
+            <h3>Add Column to {selectedTableName}</h3>
+            <div className="modal-field">
+              <label>Column name</label>
+              <input type="text" value={newColName} onChange={e => setNewColName(e.target.value)} placeholder="e.g. email" autoFocus />
+            </div>
+            <div className="modal-field">
+              <label>Type</label>
+              <select value={newColType} onChange={e => setNewColType(e.target.value)}>
+                {["text", "integer", "bigint", "boolean", "uuid", "timestamptz", "jsonb", "numeric", "float8", "date", "bytea"].map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
+            <div className="modal-field" style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+              <input type="checkbox" checked={newColNullable} onChange={e => setNewColNullable(e.target.checked)} id="col-nullable" />
+              <label htmlFor="col-nullable" style={{ marginBottom: 0 }}>Nullable</label>
+            </div>
+            <div className="modal-actions">
+              <button className="btn btn-ghost" onClick={() => setAddColumnModalOpen(false)}>Cancel</button>
+              <button className="btn btn-primary" disabled={!newColName.trim() || !selectedTableId || createColumnMut.isPending} onClick={() => {
+                createColumnMut.mutate({ table_id: selectedTableId!, name: newColName.trim(), type: newColType, is_nullable: newColNullable }, {
+                  onSuccess: () => setAddColumnModalOpen(false),
+                });
+              }}>{createColumnMut.isPending ? "Adding..." : "Add Column"}</button>
+            </div>
+            {createColumnMut.isError && <div style={{ color: "var(--err)", fontSize: 12, marginTop: 8 }}>{createColumnMut.error?.message}</div>}
+          </div>
+        </div>
+      )}
+
+      {insertRowModalOpen && (
+        <div className="modal-overlay" onClick={() => setInsertRowModalOpen(false)}>
+          <div className="modal-box" onClick={e => e.stopPropagation()} style={{ maxWidth: 520 }}>
+            <h3>Insert Row into {selectedTableName}</h3>
+            {(dbColumns ?? []).filter(c => !c.is_identity && !c.is_generated).map(col => (
+              <div key={col.id} className="modal-field">
+                <label>{col.name} <span style={{ color: "var(--fg-mute)", fontSize: 11 }}>({col.format}{col.is_nullable ? ", nullable" : ""})</span></label>
+                <input type="text" value={insertRowData[col.name] ?? ""} onChange={e => setInsertRowData(prev => ({ ...prev, [col.name]: e.target.value }))} placeholder={col.default_value ? `Default: ${col.default_value}` : col.is_nullable ? "NULL" : ""} />
+              </div>
+            ))}
+            <div className="modal-actions">
+              <button className="btn btn-ghost" onClick={() => setInsertRowModalOpen(false)}>Cancel</button>
+              <button className="btn btn-primary" disabled={insertRowMut.isPending} onClick={() => {
+                const data: Record<string, unknown> = {};
+                for (const [k, v] of Object.entries(insertRowData)) {
+                  if (v !== "") data[k] = v;
+                }
+                insertRowMut.mutate(data, { onSuccess: () => setInsertRowModalOpen(false) });
+              }}>{insertRowMut.isPending ? "Inserting..." : "Insert Row"}</button>
+            </div>
+            {insertRowMut.isError && <div style={{ color: "var(--err)", fontSize: 12, marginTop: 8 }}>{insertRowMut.error?.message}</div>}
+          </div>
+        </div>
+      )}
+
+      {newPolicyModalOpen && (
+        <div className="modal-overlay" onClick={() => setNewPolicyModalOpen(false)}>
+          <div className="modal-box" onClick={e => e.stopPropagation()}>
+            <h3>New RLS Policy for {selectedTableName}</h3>
+            <div className="modal-field">
+              <label>Policy name</label>
+              <input type="text" value={newPolicyName} onChange={e => setNewPolicyName(e.target.value)} placeholder="e.g. enable_read_for_all" autoFocus />
+            </div>
+            <div className="modal-field">
+              <label>USING expression</label>
+              <input type="text" value={newPolicyDefinition} onChange={e => setNewPolicyDefinition(e.target.value)} placeholder="true" />
+            </div>
+            <div className="modal-actions">
+              <button className="btn btn-ghost" onClick={() => setNewPolicyModalOpen(false)}>Cancel</button>
+              <button className="btn btn-primary" disabled={!newPolicyName.trim() || !selectedTableId || createPolicyMut.isPending} onClick={() => {
+                createPolicyMut.mutate({ name: newPolicyName.trim(), table: selectedTableName, schema: selectedTableSchema, definition: newPolicyDefinition, command: "ALL" }, {
+                  onSuccess: () => setNewPolicyModalOpen(false),
+                });
+              }}>{createPolicyMut.isPending ? "Creating..." : "Create Policy"}</button>
+            </div>
+            {createPolicyMut.isError && <div style={{ color: "var(--err)", fontSize: 12, marginTop: 8 }}>{createPolicyMut.error?.message}</div>}
+          </div>
+        </div>
+      )}
+
       {/* File detail side panel */}
       {fileDetailOpen && (
         <aside className="file-detail open" aria-hidden="false">
@@ -1651,6 +2565,25 @@ export default function ProjectDetailPage() {
             </div>
           </div>
         </aside>
+      )}
+
+      {/* Delete Function Confirm Dialog */}
+      {deleteFnModalOpen && deleteFnTarget && (
+        <div className="modal-scrim open" role="dialog" aria-modal="true" onClick={() => setDeleteFnModalOpen(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <div className="modal-head">
+              <h3 style={{ color: "var(--err)" }}>Delete function</h3>
+              <button className="close" onClick={() => setDeleteFnModalOpen(false)} aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ width: 14, height: 14 }}><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+            </div>
+            <div className="modal-body">
+              <p>Are you sure you want to delete <strong className="mono">{deleteFnTarget.name}</strong>? This action cannot be undone.</p>
+            </div>
+            <div className="modal-foot">
+              <button className="btn btn-ghost" onClick={() => setDeleteFnModalOpen(false)}>Cancel</button>
+              <button className="btn btn-danger" onClick={async () => { try { await deleteFunctionMut.mutateAsync({ projectId, functionId: deleteFnTarget.id }); } catch {} finally { setDeleteFnModalOpen(false); setDeleteFnTarget(null); } }}>Delete</button>
+            </div>
+          </div>
+        </div>
       )}
     </>
   );

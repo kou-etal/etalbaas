@@ -33,17 +33,19 @@ function CopyBtn({ text, bare }: { text: string; bare?: boolean }) {
 /* ===== Helpers ===== */
 function kindLabel(kind: string): string {
   switch (kind) {
-    case "heavy_job": return "Heavy Job";
-    case "light_function": return "Light Function";
+    case "heavy-job": return "Heavy Job";
+    case "heavy-deployment": return "Heavy Deployment";
+    case "light-deployment": return "Light Deployment";
     case "gpu_inference": return "GPU Inference";
-    default: return kind.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+    default: return kind.replace(/[-_]/g, " ").replace(/\b\w/g, c => c.toUpperCase());
   }
 }
 
 function kindClass(kind: string): string {
   switch (kind) {
-    case "heavy_job": return "heavy-job";
-    case "light_function": return "light-fn";
+    case "heavy-job": return "heavy-job";
+    case "heavy-deployment": return "heavy-deployment";
+    case "light-deployment": return "light-deployment";
     case "gpu_inference": return "gpu";
     default: return "";
   }
@@ -140,6 +142,13 @@ export default function FunctionDetailPage() {
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [deleteInput, setDeleteInput] = useState("");
 
+  /* Invoke modal state */
+  const [invokeOpen, setInvokeOpen] = useState(false);
+  const [invokePayload, setInvokePayload] = useState("{}");
+  const [invokeLoading, setInvokeLoading] = useState(false);
+  const [invokeResult, setInvokeResult] = useState<{ status: number; body: string } | null>(null);
+  const [invokeError, setInvokeError] = useState<string | null>(null);
+
   /* Settings state */
   const [fnDispName, setFnDispName] = useState("");
   const [fnDesc, setFnDesc] = useState("");
@@ -190,6 +199,33 @@ export default function FunctionDetailPage() {
   const openDeleteModal = () => {
     setDeleteInput("");
     setDeleteModalOpen(true);
+  };
+
+  const openInvokeModal = () => {
+    setInvokeResult(null);
+    setInvokeError(null);
+    setInvokeOpen(true);
+  };
+
+  const handleInvoke = async () => {
+    if (!fn) return;
+    setInvokeLoading(true);
+    setInvokeResult(null);
+    setInvokeError(null);
+    try {
+      const params = new URLSearchParams({ project_id: projectId, function_name: fn.name });
+      const res = await fetch(`/api/functions/invoke?${params}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: invokePayload,
+      });
+      const body = await res.text();
+      setInvokeResult({ status: res.status, body });
+    } catch (err) {
+      setInvokeError(String(err));
+    } finally {
+      setInvokeLoading(false);
+    }
   };
 
   /* Handlers */
@@ -302,7 +338,7 @@ export default function FunctionDetailPage() {
                   </div>
                 </div>
                 <div className="right">
-                  <button className="btn btn-primary">
+                  <button className="btn btn-primary" onClick={openInvokeModal}>
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{width:13,height:13}}><polygon points="5 3 19 12 5 21 5 3"/></svg>
                     Invoke
                   </button>
@@ -749,6 +785,55 @@ export default function FunctionDetailPage() {
 
             </div>
           </main>
+
+      {/* ===== Invoke modal ===== */}
+      <div className={`modal-scrim${invokeOpen ? " open" : ""}`} onClick={e => { if (e.target === e.currentTarget) setInvokeOpen(false); }}>
+        <div className="modal" style={{maxWidth:560}}>
+          <div className="modal-head">
+            <h3>Invoke {fn.name}</h3>
+            <button className="close" onClick={() => setInvokeOpen(false)} aria-label="Close">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{width:14,height:14}}><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+          </div>
+          <div className="modal-body" style={{display:"flex",flexDirection:"column",gap:14}}>
+            <div className="field">
+              <label htmlFor="invoke-payload">Request body (JSON)</label>
+              <textarea
+                id="invoke-payload"
+                className="mono"
+                style={{minHeight:120,resize:"vertical",fontFamily:"'JetBrains Mono',monospace",fontSize:12.5}}
+                value={invokePayload}
+                onChange={e => setInvokePayload(e.target.value)}
+                placeholder='{ "key": "value" }'
+              />
+            </div>
+            {invokeResult && (
+              <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                <div style={{display:"flex",alignItems:"center",gap:8}}>
+                  <span style={{fontSize:12,color:"var(--fg-mute)"}}>Response</span>
+                  <span className={`badge-s ${invokeResult.status < 400 ? "completed" : "failed"}`}>
+                    <span className="dt" />{invokeResult.status}
+                  </span>
+                </div>
+                <pre className="json-block" style={{maxHeight:220,overflow:"auto",fontSize:12,margin:0,whiteSpace:"pre-wrap",wordBreak:"break-all"}}>{invokeResult.body}</pre>
+              </div>
+            )}
+            {invokeError && (
+              <div className="modal-err">
+                <span className="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg></span>
+                <p>{invokeError}</p>
+              </div>
+            )}
+          </div>
+          <div className="modal-foot-inner">
+            <button className="btn btn-ghost" onClick={() => setInvokeOpen(false)}>Close</button>
+            <button className="btn btn-primary" onClick={handleInvoke} disabled={invokeLoading}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{width:13,height:13}}><polygon points="5 3 19 12 5 21 5 3"/></svg>
+              {invokeLoading ? "Sending\u2026" : "Send"}
+            </button>
+          </div>
+        </div>
+      </div>
 
       {/* ===== Delete function modal ===== */}
       <div className={`modal-scrim${deleteModalOpen ? " open" : ""}`} onClick={e => { if (e.target === e.currentTarget) setDeleteModalOpen(false); }}>
