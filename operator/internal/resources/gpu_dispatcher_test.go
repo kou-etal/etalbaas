@@ -191,9 +191,10 @@ func TestDesiredGPUDispatcherJob_GVisorSandbox(t *testing.T) {
 	}
 
 	cfg := config.OperatorConfig{
-		PlatformNamespace: "platform-system",
-		DispatcherImage:   "etalbaas/gpu-dispatcher:latest",
-		GPU:               gpu.DefaultGPUConfig(),
+		PlatformNamespace:   "platform-system",
+		DispatcherImage:     "etalbaas/gpu-dispatcher:latest",
+		GPU:                 gpu.DefaultGPUConfig(),
+		SandboxRuntimeClass: "gvisor",
 	}
 
 	job := DesiredGPUDispatcherJob(fn, "img:v1", cfg, "runpod", "inv-004")
@@ -232,9 +233,30 @@ func TestDesiredGPUDispatcherJob_GVisorSandbox(t *testing.T) {
 		t.Errorf("Capabilities.Drop = %v, want [ALL]", container.SecurityContext.Capabilities.Drop)
 	}
 
-	// AutomountServiceAccountToken should be false
+	// AutomountServiceAccountToken should be false (projected volume used instead)
 	if podSpec.AutomountServiceAccountToken == nil || *podSpec.AutomountServiceAccountToken {
 		t.Error("AutomountServiceAccountToken should be false")
+	}
+
+	// Projected SA token volume should exist with 15-minute expiry
+	var foundTokenVol bool
+	for _, v := range podSpec.Volumes {
+		if v.Name == "sa-token" && v.Projected != nil {
+			foundTokenVol = true
+			for _, src := range v.Projected.Sources {
+				if src.ServiceAccountToken != nil && *src.ServiceAccountToken.ExpirationSeconds != 900 {
+					t.Errorf("SA token expiry = %d, want 900", *src.ServiceAccountToken.ExpirationSeconds)
+				}
+			}
+		}
+	}
+	if !foundTokenVol {
+		t.Error("Expected projected sa-token volume")
+	}
+
+	// ServiceAccountName should be gpu-dispatcher
+	if podSpec.ServiceAccountName != "gpu-dispatcher" {
+		t.Errorf("ServiceAccountName = %q, want %q", podSpec.ServiceAccountName, "gpu-dispatcher")
 	}
 }
 

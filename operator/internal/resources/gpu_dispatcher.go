@@ -29,6 +29,8 @@ func DesiredGPUDispatcherJob(
 
 	labels := gpuDispatcherLabels(projectID, funcName)
 
+	resultCMName := GPUResultConfigMapName(invocationID)
+
 	env := []corev1.EnvVar{
 		{Name: "GPU_PROVIDER", Value: providerName},
 		{Name: "GPU_PRODUCT", Value: resolveGPUProduct(fn)},
@@ -37,6 +39,8 @@ func DesiredGPUDispatcherJob(
 		{Name: "FUNCTION_NAME", Value: funcName},
 		{Name: "PROJECT_ID", Value: projectID},
 		{Name: "INVOCATION_ID", Value: invocationID},
+		{Name: "RESULT_CONFIGMAP_NAME", Value: resultCMName},
+		{Name: "RESULT_NAMESPACE", Value: cfg.PlatformNamespace},
 	}
 
 	// Pass provider-specific config as env vars with PROVIDER_CONFIG_ prefix.
@@ -72,7 +76,6 @@ func DesiredGPUDispatcherJob(
 	var ttlSeconds int32 = 600
 	// ActiveDeadlineSeconds: prevent stuck dispatchers from running forever.
 	var activeDeadline int64 = 1800 // 30 minutes
-	gvisorRuntime := "gvisor"
 
 	trueVal := true
 	var uid int64 = 65532
@@ -99,13 +102,30 @@ func DesiredGPUDispatcherJob(
 					Annotations: annotations,
 				},
 				Spec: corev1.PodSpec{
-					RestartPolicy:    corev1.RestartPolicyNever,
-					RuntimeClassName: &gvisorRuntime,
+					ServiceAccountName:           "gpu-dispatcher",
+					RestartPolicy:                corev1.RestartPolicyNever,
 					AutomountServiceAccountToken: boolPtr(false),
 					SecurityContext: &corev1.PodSecurityContext{
 						RunAsNonRoot: &trueVal,
 						SeccompProfile: &corev1.SeccompProfile{
 							Type: corev1.SeccompProfileTypeRuntimeDefault,
+						},
+					},
+					Volumes: []corev1.Volume{
+						{
+							Name: "sa-token",
+							VolumeSource: corev1.VolumeSource{
+								Projected: &corev1.ProjectedVolumeSource{
+									Sources: []corev1.VolumeProjection{
+										{
+											ServiceAccountToken: &corev1.ServiceAccountTokenProjection{
+												ExpirationSeconds: int64Ptr(900),
+												Path:              "token",
+											},
+										},
+									},
+								},
+							},
 						},
 					},
 					Containers: []corev1.Container{
@@ -132,6 +152,9 @@ func DesiredGPUDispatcherJob(
 									corev1.ResourceMemory: resource.MustParse("128Mi"),
 								},
 							},
+							VolumeMounts: []corev1.VolumeMount{
+								{Name: "sa-token", MountPath: "/var/run/secrets/kubernetes.io/serviceaccount", ReadOnly: true},
+							},
 						},
 					},
 				},
@@ -139,7 +162,26 @@ func DesiredGPUDispatcherJob(
 		},
 	}
 
+	// Set RuntimeClassName only when configured (e.g., "gvisor" in production).
+	if cfg.SandboxRuntimeClass != "" {
+		rc := cfg.SandboxRuntimeClass
+		job.Spec.Template.Spec.RuntimeClassName = &rc
+	}
+
 	return job
+}
+
+// GPUResultConfigMapName returns the ConfigMap name for storing GPU job results.
+// The Function MS reads this ConfigMap after the dispatcher Job completes.
+func GPUResultConfigMapName(invocationID string) string {
+	h := sha256.Sum256([]byte(invocationID))
+	suffix := hex.EncodeToString(h[:4]) // 8 hex chars
+	return "gpu-result-" + suffix
+}
+
+// GPUDispatcherJobName returns the Job name for external callers (e.g., Function MS).
+func GPUDispatcherJobName(funcName, invocationID string) string {
+	return gpuDispatcherJobName(funcName, invocationID)
 }
 
 // gpuDispatcherJobName builds a deterministic Job name that fits within
