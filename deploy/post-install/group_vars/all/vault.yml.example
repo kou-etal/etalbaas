@@ -1,22 +1,23 @@
 ---
-# Ansible Vault encrypted variables template.
-# Copy to vault.yml and encrypt with: ansible-vault encrypt vault.yml
+# Ansible Vault — Infrastructure Secrets
 #
-# IMPORTANT: .vault-password file must exist (not committed to Git).
-# Store the vault password in a password manager.
+# Setup:
+#   cp vault.yml.example vault.yml
+#   # fill in values
+#   ansible-vault encrypt vault.yml
+#   echo 'your-password' > .vault-password
 
-# Sealed Secrets private key (TLS keypair)
-# Initial setup: generate with openssl, then paste base64 here.
-# Recovery: reuse the existing key to decrypt old SealedSecrets.
-sealed_secrets_tls_crt: "<base64-encoded public certificate>"
-sealed_secrets_tls_key: "<base64-encoded private key>"
+# ─── Sealed Secrets TLS keypair ─────────────────────────────────────────────
+# Generate: openssl req -x509 -nodes -newkey rsa:4096 -keyout tls.key -out tls.crt -days 3650
+# Paste base64-encoded values here.
+# Recovery: reuse the same key to decrypt old SealedSecrets.
+sealed_secrets_tls_crt: ""
+sealed_secrets_tls_key: ""
 
-# ArgoCD admin password (bcrypt hash)
+# ─── ArgoCD ─────────────────────────────────────────────────────────────────
 # Generate: htpasswd -nbBC 10 "" 'your-password' | tr -d ':\n' | sed 's/$2y/$2a/'
-argocd_admin_password_hash: "<bcrypt hash>"
+argocd_admin_password_hash: ""
 
-# Cloudflare API Token (DNS edit permission for the zone)
-cloudflare_api_token: "<cloudflare-api-token>"
-
-# Cloudflare Zone ID
-cloudflare_zone_id: "<zone-id>"
+# ─── Cloudflare (DNS + cert-manager) ────────────────────────────────────────
+cloudflare_api_token: ""
+cloudflare_zone_id: ""

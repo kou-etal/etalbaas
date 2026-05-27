@@ -1,0 +1,19 @@
+---
+# EtalBaaS Platform Configuration (non-secret, plaintext)
+# Edit values before running deploy.sh.
+
+# ─── Domain ──────────────────────────────────────────────────────────────────
+base_domain: "yourdomain.com"
+
+# ─── kube-vip Virtual IP ─────────────────────────────────────────────────────
+kube_vip_address: "203.0.113.100"
+
+# ─── S3 / R2 Object Storage ─────────────────────────────────────────────────
+s3_endpoint: ""
+s3_bucket: "etalbaas-storage"
+s3_region: "auto"
+
+# ─── Backup ─────────────────────────────────────────────────────────────────
+backup_enabled: false
+backup_endpoint: ""
+backup_bucket: "etalbaas-backups"
