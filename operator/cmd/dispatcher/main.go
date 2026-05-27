@@ -2,14 +2,21 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
+
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 
 	"github.com/kou-etal/etalbaas/operator/internal/provider/gpu"
 )
@@ -42,6 +49,8 @@ func run(ctx context.Context) error {
 
 	gpuType := getEnv("GPU_TYPE", "any")
 	apiKey := getEnv("GPU_API_KEY", "")
+	resultCMName := os.Getenv("RESULT_CONFIGMAP_NAME")
+	resultNS := os.Getenv("RESULT_NAMESPACE")
 
 	providerConfig := loadProviderConfig()
 
@@ -56,11 +65,17 @@ func run(ctx context.Context) error {
 		return fmt.Errorf("build provider: %w", err)
 	}
 
+	var inputPayload json.RawMessage
+	if v := os.Getenv("INPUT_PAYLOAD"); v != "" {
+		inputPayload = json.RawMessage(v)
+	}
+
 	job := gpu.GPUJob{
 		FunctionName:   getEnv("FUNCTION_NAME", ""),
 		ProjectID:      getEnv("PROJECT_ID", ""),
 		Image:          functionImage,
 		GPUType:        gpuType,
+		Input:          inputPayload,
 		ProviderConfig: providerConfig,
 	}
 
@@ -89,6 +104,17 @@ func run(ctx context.Context) error {
 		"execution_ms", status.ExecutionTimeMs,
 	)
 
+	// Write result to ConfigMap if configured (Function MS reads this).
+	if resultCMName != "" && resultNS != "" {
+		if writeErr := writeResultConfigMap(ctx, resultCMName, resultNS, status, job); writeErr != nil {
+			slog.Error("failed to write result ConfigMap", "error", writeErr)
+			// Don't fail the dispatcher for ConfigMap write errors;
+			// the job result is already logged above.
+		} else {
+			slog.Info("result ConfigMap written", "name", resultCMName, "namespace", resultNS)
+		}
+	}
+
 	if status.State == gpu.JobStateFailed {
 		errMsg := status.Error
 		if errMsg == "" {
@@ -101,6 +127,41 @@ func run(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// writeResultConfigMap creates a ConfigMap with the GPU job result so that
+// Function MS can read it after the Job completes.
+func writeResultConfigMap(ctx context.Context, name, namespace string, status gpu.JobStatus, job gpu.GPUJob) error {
+	config, err := rest.InClusterConfig()
+	if err != nil {
+		return fmt.Errorf("in-cluster config: %w", err)
+	}
+	clientset, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		return fmt.Errorf("create k8s client: %w", err)
+	}
+
+	cm := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+			Labels: map[string]string{
+				"etalbaas.io/type":       "gpu-result",
+				"etalbaas.io/project-id": job.ProjectID,
+				"etalbaas.io/function":   job.FunctionName,
+			},
+		},
+		Data: map[string]string{
+			"status":       string(status.State),
+			"output":       string(status.Output),
+			"error":        status.Error,
+			"delay_ms":     strconv.FormatInt(status.DelayTimeMs, 10),
+			"execution_ms": strconv.FormatInt(status.ExecutionTimeMs, 10),
+		},
+	}
+
+	_, err = clientset.CoreV1().ConfigMaps(namespace).Create(ctx, cm, metav1.CreateOptions{})
+	return err
 }
 
 func buildProvider(name, apiKey string, providerConfig map[string]string) (gpu.Provider, error) {
