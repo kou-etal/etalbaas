@@ -1,6 +1,8 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import { useRouter, usePathname } from "next/navigation";
+import { useAuth } from "@/features/auth/use-auth";
 
 export default function DashboardLayout({
   children,
@@ -9,8 +11,26 @@ export default function DashboardLayout({
 }) {
   const router = useRouter();
   const pathname = usePathname();
+  const { user, signOut } = useAuth();
   const isProjects = pathname.startsWith("/projects");
   const isSettings = pathname.startsWith("/settings");
+  const [avatarOpen, setAvatarOpen] = useState(false);
+
+  const userEmail = user?.email || "";
+
+  // Close avatar dropdown on outside click (skip clicks on the toggle itself)
+  useEffect(() => {
+    const close = (e: MouseEvent) => {
+      if ((e.target as HTMLElement).closest?.(".avatar")) return;
+      setAvatarOpen(false);
+    };
+    document.addEventListener("click", close);
+    return () => document.removeEventListener("click", close);
+  }, []);
+
+  const handleSignOut = () => {
+    signOut();
+  };
 
   return (
     <>
@@ -44,7 +64,24 @@ export default function DashboardLayout({
               <span className="tip">Docs</span>
             </button>
           </nav>
-          <button className="avatar" aria-label="Account menu">EB</button>
+          <div style={{ position: "relative" }}>
+            <button
+              className="avatar"
+              aria-label="Open account menu"
+              onClick={() => setAvatarOpen(!avatarOpen)}
+            >
+              {userEmail ? userEmail.charAt(0).toUpperCase() : "U"}
+            </button>
+            {avatarOpen && (
+              <div role="menu" className="avatar-menu">
+                <div className="avatar-menu-email">{userEmail || "user@etalbaas.dev"}</div>
+                <button role="menuitem" className="avatar-menu-item" onClick={handleSignOut}>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ width: 14, height: 14 }}><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" /></svg>
+                  Sign out
+                </button>
+              </div>
+            )}
+          </div>
         </aside>
 
         <div className="main">

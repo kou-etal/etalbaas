@@ -34,7 +34,7 @@ export function Sidebar() {
 
   return (
     <TooltipProvider delayDuration={0}>
-      <aside className="fixed left-0 top-0 z-40 flex h-screen w-16 flex-col items-center border-r border-sidebar-border bg-sidebar py-4">
+      <aside className="fixed left-0 top-0 z-40 flex h-screen w-16 flex-col items-center border-r border-sidebar-border bg-sidebar py-4" aria-label="Primary navigation">
         {/* Logo */}
         <Link href="/projects" className="mb-8" aria-label="Home">
           <svg

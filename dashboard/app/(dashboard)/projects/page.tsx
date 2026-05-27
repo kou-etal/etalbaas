@@ -64,6 +64,7 @@ export default function ProjectsPage() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<FilterKey>("all");
   const searchRef = useRef<HTMLInputElement>(null);
+  const [shortcutsReady, setShortcutsReady] = useState(false);
 
   /* ===== Modal state ===== */
   const [modalOpen, setModalOpen] = useState(false);
@@ -260,6 +261,7 @@ export default function ProjectsPage() {
     };
 
     document.addEventListener("keydown", handler);
+    setShortcutsReady(true);
     return () => document.removeEventListener("keydown", handler);
   }, [modalOpen, openModal, closeModal]);
 
@@ -300,10 +302,11 @@ export default function ProjectsPage() {
                   <input
                     ref={searchRef}
                     type="text"
-                    placeholder="Search projects\u2026"
+                    placeholder={"Search projects\u2026"}
                     aria-label="Search projects"
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
+                    style={shortcutsReady ? undefined : { visibility: "hidden" as const }}
                   />
                   <span className="kbd-hint">/</span>
                 </label>
@@ -416,10 +419,12 @@ export default function ProjectsPage() {
           </main>
 
       {/* Toast */}
-      <div className={`toast${toastShow ? " show" : ""}`}>
-        <span className="spinner" />
-        <span>{toastText}</span>
-      </div>
+      {toastShow && (
+        <div className="toast show">
+          <span className="spinner" />
+          <span>{toastText}</span>
+        </div>
+      )}
 
       {/* ====== Create Project modal ====== */}
       <div
