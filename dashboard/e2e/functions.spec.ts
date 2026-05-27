@@ -8,10 +8,12 @@ test.describe("Functions", () => {
     const projectLink = page.locator("[href^='/projects/']").first();
     if (await projectLink.isVisible()) {
       await projectLink.click();
-      await page.waitForURL(/\/projects\/[a-zA-Z0-9]+$/);
-      // Navigate to Functions tab
-      await page.getByRole("link", { name: "Functions" }).click();
-      await page.waitForURL(/\/functions$/);
+      await page.waitForURL(/\/projects\/[a-zA-Z0-9-]+$/);
+      // Navigate to Functions tab (tab, not link — single-page tab UI)
+      const functionsTab = page.getByRole("tab", { name: "Functions" });
+      await expect(functionsTab).toBeVisible({ timeout: 15000 });
+      await functionsTab.click();
+      await expect(functionsTab).toHaveAttribute("aria-selected", "true");
     } else {
       test.skip();
     }
@@ -26,8 +28,8 @@ test.describe("Functions", () => {
 
   test("should show empty state or function list", async ({ page }) => {
     // Either "No functions" empty state or a function table
-    const emptyState = page.getByText("No functions");
-    const table = page.locator("table");
+    const emptyState = page.getByText("No functions deployed");
+    const table = page.locator(".fn-table");
 
     const hasEmpty = await emptyState.isVisible().catch(() => false);
     const hasTable = await table.isVisible().catch(() => false);

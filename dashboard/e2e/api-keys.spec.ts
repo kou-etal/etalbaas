@@ -8,19 +8,21 @@ test.describe("API Keys", () => {
     const projectLink = page.locator("[href^='/projects/']").first();
     if (await projectLink.isVisible()) {
       await projectLink.click();
-      await page.waitForURL(/\/projects\/[a-zA-Z0-9]+$/);
-      // Navigate to API Keys tab
-      await page.getByRole("link", { name: "API Keys" }).click();
-      await page.waitForURL(/\/api-keys$/);
+      await page.waitForURL(/\/projects\/[a-zA-Z0-9-]+$/);
+      // Navigate to API Keys tab (use filter to handle optional count badge)
+      const apiKeysTab = page.locator('[role="tab"]').filter({ hasText: /^API Keys/ });
+      await expect(apiKeysTab).toBeVisible({ timeout: 15000 });
+      await apiKeysTab.click();
+      await expect(apiKeysTab).toHaveAttribute("aria-selected", "true");
     } else {
       test.skip();
     }
   });
 
-  test("should display API Keys page", async ({ page }) => {
+  test("should display API Keys heading", async ({ page }) => {
     await expect(
       page.getByRole("heading", { name: "API Keys", exact: true })
-    ).toBeVisible();
+    ).toBeVisible({ timeout: 10000 });
   });
 
   test("should create an API key", async ({ page }) => {
@@ -31,7 +33,7 @@ test.describe("API Keys", () => {
     await expect(dialog).toBeVisible();
 
     const keyName = `e2e-key-${Date.now()}`;
-    await dialog.getByLabel("Key Name").fill(keyName);
+    await dialog.locator("input[type='text']").fill(keyName);
     await dialog.getByRole("button", { name: /create key/i }).click();
 
     // Should show the raw key
@@ -39,8 +41,8 @@ test.describe("API Keys", () => {
       timeout: 10000,
     });
 
-    // Raw key should be displayed
-    const keyDisplay = page.locator("code").first();
+    // Raw key should be displayed in the key-block
+    const keyDisplay = page.locator(".key-block");
     await expect(keyDisplay).toBeVisible();
     const keyText = await keyDisplay.textContent();
     expect(keyText).toBeTruthy();
@@ -49,7 +51,7 @@ test.describe("API Keys", () => {
     // Close dialog
     await page.getByRole("button", { name: "Done" }).click();
 
-    // Verify key appears in the list with keyPrefix
+    // Verify key appears in the list
     await expect(page.getByText(keyName)).toBeVisible({ timeout: 5000 });
   });
 

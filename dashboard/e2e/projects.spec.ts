@@ -17,7 +17,7 @@ test.describe("Projects", () => {
     await page.goto("/projects");
 
     // Wait for page to fully render
-    const newProjectBtn = page.getByRole("button", { name: /new project/i }).first();
+    const newProjectBtn = page.locator("#new-project");
     await expect(newProjectBtn).toBeVisible({ timeout: 15000 });
     await newProjectBtn.click();
 
@@ -26,14 +26,15 @@ test.describe("Projects", () => {
     await expect(dialog).toBeVisible();
 
     const projectName = `e2e-test-${Date.now()}`;
-    await dialog.getByLabel("Project Name").fill(projectName);
-    await dialog.getByLabel("Description").fill("Created by Playwright E2E test");
+    // Labels use lowercase: "Project name" and "Description"
+    await dialog.locator("#cp-name").fill(projectName);
+    await dialog.locator("#cp-desc").fill("Created by Playwright E2E test");
 
     // Submit
     await dialog.getByRole("button", { name: /create project/i }).click();
 
     // Wait for dialog to close (API may take time + 1.4s success view)
-    await expect(dialog).not.toBeVisible({ timeout: 20000 });
+    await expect(dialog).not.toBeVisible({ timeout: 30000 });
 
     // Verify the project appears in the list (also matches toast, use first)
     await expect(page.getByText(projectName).first()).toBeVisible({ timeout: 10000 });
@@ -41,7 +42,7 @@ test.describe("Projects", () => {
 
   test("should show service toggles in create dialog", async ({ page }) => {
     await page.goto("/projects");
-    await page.getByRole("button", { name: /new project/i }).first().click();
+    await page.locator("#new-project").click();
 
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible();
@@ -85,7 +86,7 @@ test.describe("Projects", () => {
     const projectCard = page.locator("[href^='/projects/']").first();
     if (await projectCard.isVisible()) {
       await projectCard.click();
-      await expect(page).toHaveURL(/\/projects\/[a-zA-Z0-9]+$/);
+      await expect(page).toHaveURL(/\/projects\/[a-zA-Z0-9-]+$/);
     }
   });
 });

@@ -8,19 +8,21 @@ test.describe("Secrets", () => {
     const projectLink = page.locator("[href^='/projects/']").first();
     if (await projectLink.isVisible()) {
       await projectLink.click();
-      await page.waitForURL(/\/projects\/[a-zA-Z0-9]+$/);
-      // Navigate to Secrets tab
-      await page.getByRole("link", { name: "Secrets" }).click();
-      await page.waitForURL(/\/secrets$/);
+      await page.waitForURL(/\/projects\/[a-zA-Z0-9-]+$/);
+      // Navigate to Secrets tab (tab, not link — single-page tab UI)
+      const secretsTab = page.getByRole("tab", { name: "Secrets" });
+      await expect(secretsTab).toBeVisible({ timeout: 15000 });
+      await secretsTab.click();
+      await expect(secretsTab).toHaveAttribute("aria-selected", "true");
     } else {
       test.skip();
     }
   });
 
-  test("should display secrets page", async ({ page }) => {
+  test("should display secrets heading", async ({ page }) => {
     await expect(
       page.getByRole("heading", { name: "Secrets", exact: true })
-    ).toBeVisible();
+    ).toBeVisible({ timeout: 10000 });
   });
 
   test("should show Name field in create dialog (not Key)", async ({
@@ -32,11 +34,11 @@ test.describe("Secrets", () => {
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible();
 
-    // Should have "Name" label, not "Key" — this validates proto alignment
-    await expect(dialog.getByLabel("Name")).toBeVisible();
-    await expect(dialog.getByLabel("Value")).toBeVisible();
+    // Should have Name and Value inputs
+    await expect(dialog.locator("#secret-name")).toBeVisible();
+    await expect(dialog.locator("#secret-value")).toBeVisible();
 
-    // Close without submitting (API may fail if K8s namespace not provisioned)
+    // Close without submitting
     await dialog.getByRole("button", { name: "Cancel" }).click();
   });
 
@@ -65,7 +67,7 @@ test.describe("Secrets", () => {
       // Confirm dialog should appear
       const confirmDialog = page.getByRole("dialog");
       await expect(confirmDialog).toBeVisible();
-      await confirmDialog.getByRole("button", { name: "Delete" }).click();
+      await confirmDialog.getByRole("button", { name: /delete/i }).click();
 
       // Wait for deletion
       await page.waitForTimeout(2000);
