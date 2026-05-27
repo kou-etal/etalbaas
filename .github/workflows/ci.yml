@@ -73,6 +73,9 @@ jobs:
           - name: etalbaas-dashboard
             dockerfile: dashboard/Dockerfile
             context: .
+            build-args: |
+              NEXT_PUBLIC_API_URL=https://api.${{ vars.ETALBAAS_DOMAIN || 'etalbaas.example.com' }}
+              NEXT_PUBLIC_GOTRUE_URL=https://auth.${{ vars.ETALBAAS_DOMAIN || 'etalbaas.example.com' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -100,5 +103,6 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: ${{ matrix.build-args || '' }}
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,scope=${{ matrix.name }},mode=max
