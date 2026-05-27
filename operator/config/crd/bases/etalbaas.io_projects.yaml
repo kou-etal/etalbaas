@@ -3,7 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.17.2
+    controller-gen.kubebuilder.io/version: v0.16.5
   name: projects.etalbaas.io
 spec:
   group: etalbaas.io
@@ -215,6 +215,14 @@ spec:
                           "Provisioning", "Failed").
                         type: string
                     type: object
+                  gotrue:
+                    description: GoTrue is the status of the GoTrue auth component.
+                    properties:
+                      status:
+                        description: Status is the component status (e.g., "Ready",
+                          "Provisioning", "Failed").
+                        type: string
+                    type: object
                   postgres:
                     description: Postgres is the status of the PostgreSQL component.
                     properties:
@@ -226,6 +234,14 @@ spec:
                         type: string
                       status:
                         description: Status is the component status.
+                        type: string
+                    type: object
+                  postgresMeta:
+                    description: PostgresMeta is the status of the postgres-meta component.
+                    properties:
+                      status:
+                        description: Status is the component status (e.g., "Ready",
+                          "Provisioning", "Failed").
                         type: string
                     type: object
                   postgrest:
@@ -306,6 +322,9 @@ spec:
               endpoints:
                 description: Endpoints contains the provisioned endpoints.
                 properties:
+                  authApi:
+                    description: AuthApi is the GoTrue auth API endpoint URL.
+                    type: string
                   dbConnectionString:
                     description: DbConnectionString is the full database connection
                       string.

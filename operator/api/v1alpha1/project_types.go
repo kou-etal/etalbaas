@@ -183,6 +183,14 @@ type ComponentStatuses struct {
 	// CDC is the status of the CDC Pod component.
 	// +optional
 	CDC *ComponentStatus `json:"cdc,omitempty"`
+
+	// PostgresMeta is the status of the postgres-meta component.
+	// +optional
+	PostgresMeta *ComponentStatus `json:"postgresMeta,omitempty"`
+
+	// GoTrue is the status of the GoTrue auth component.
+	// +optional
+	GoTrue *ComponentStatus `json:"gotrue,omitempty"`
 }
 
 // ComponentStatus represents the status of a single component.
@@ -222,6 +230,10 @@ type EndpointStatus struct {
 	// DbConnectionString is the full database connection string.
 	// +optional
 	DbConnectionString string `json:"dbConnectionString,omitempty"`
+
+	// AuthApi is the GoTrue auth API endpoint URL.
+	// +optional
+	AuthApi string `json:"authApi,omitempty"`
 }
 
 // ApiKeyRef is a reference to a provisioned API key.
@@ -236,6 +248,7 @@ type ApiKeyRef struct {
 // Project phase constants.
 const (
 	ProjectPhasePending      = "Pending"
+	ProjectPhaseQueued       = "Queued"
 	ProjectPhaseProvisioning = "Provisioning"
 	ProjectPhaseReady        = "Ready"
 	ProjectPhaseFailed       = "Failed"
