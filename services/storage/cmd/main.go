@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/nats-io/nats.go"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/kou-etal/etalbaas/pkg/server"
 	"github.com/kou-etal/etalbaas/proto/gen/go/etalbaas/storage/v1/storagev1connect"
 	"github.com/kou-etal/etalbaas/services/storage/internal"
+	"github.com/kou-etal/etalbaas/services/storage/internal/event"
 	"github.com/kou-etal/etalbaas/services/storage/internal/handler"
 	resthandler "github.com/kou-etal/etalbaas/services/storage/internal/handler/rest"
 	"github.com/kou-etal/etalbaas/services/storage/internal/metastore"
@@ -32,7 +34,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	shutdown, err := observability.Init(ctx, observability.Config{
+	obs, err := observability.Init(ctx, observability.Config{
 		ServiceName:    "storage",
 		ServiceVersion: "0.1.0",
 		OTELEndpoint:   cfg.OTELEndpoint,
@@ -42,7 +44,7 @@ func main() {
 		log.Fatal(err)
 	}
 	defer func() {
-		if err := shutdown(ctx); err != nil {
+		if err := obs.Shutdown(ctx); err != nil {
 			slog.Error("observability shutdown failed", "error", err)
 		}
 	}()
@@ -92,10 +94,33 @@ func main() {
 
 	defer poolProvider.Close()
 
+	// NATS JetStream (optional: event publishing for storage triggers).
+	var pub event.Publisher
+	if cfg.NATSURL != "" {
+		nc, err := nats.Connect(cfg.NATSURL,
+			nats.Name("storage-ms"),
+			nats.MaxReconnects(-1),
+			nats.ReconnectWait(2*time.Second),
+		)
+		if err != nil {
+			log.Fatal("nats connect: ", err)
+		}
+		defer nc.Close()
+
+		js, err := nc.JetStream()
+		if err != nil {
+			log.Fatal("nats jetstream: ", err)
+		}
+		pub = event.NewNATSPublisher(js, cfg.NATSSubjectPrefix)
+		slog.Info("NATS event publishing enabled", "url", cfg.NATSURL, "prefix", cfg.NATSSubjectPrefix)
+	} else {
+		slog.Info("NATS_URL not set, storage event publishing disabled")
+	}
+
 	// Services.
 	metaQ := metastore.New(metaPool)
 	bucketSvc := service.NewBucketService(metaQ, poolProvider)
-	objectSvc := service.NewObjectService(poolProvider, s3Provider)
+	objectSvc := service.NewObjectService(poolProvider, s3Provider, pub)
 
 	// gRPC handler (bucket CRUD).
 	bucketHandler := handler.NewBucketHandler(bucketSvc)
@@ -110,12 +135,18 @@ func main() {
 	// Public routes (no auth required) — must be registered separately.
 	publicRouter := resthandler.NewPublicRouter(objectSvc)
 
+	// Dashboard routes (JWT auth via gateway, no API key middleware).
+	dashboardHandler := resthandler.NewDashboardHandler(objectSvc, metaQ)
+	dashboardRouter := resthandler.NewDashboardRouter(dashboardHandler)
+
 	srv := server.New(
 		server.Config{Port: cfg.Port, MetricsPort: cfg.MetricsPort},
 		server.Handler{Pattern: grpcPath, Handler: grpcHnd},
+		server.Handler{Pattern: "/storage/v1/dashboard/", Handler: dashboardRouter},
 		server.Handler{Pattern: "/storage/v1/public/", Handler: publicRouter},
 		server.Handler{Pattern: "/storage/", Handler: http.StripPrefix("", restHnd)},
 	)
+	srv.SetMetricsHandler(obs.MetricsHandler)
 	srv.RegisterHealthChecker(func(ctx context.Context) error {
 		return metadb.HealthCheck(ctx, metaPool)
 	})
