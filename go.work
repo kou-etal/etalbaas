@@ -12,5 +12,4 @@ use (
 	./services/storage
 	./services/tenant-user
 	./storage-providers
-	./tests/e2e
 )
