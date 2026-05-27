@@ -65,10 +65,13 @@ func sanitizeSubjectToken(s string) string {
 }
 
 // EnsureStream creates or updates the JetStream stream for a project.
-// Stream captures all CDC events: events.database.*.project-{id}.>
+// Stream captures all event-driven events: database CDC + storage object events.
 func (a *NATSAdmin) EnsureStream(projectID string) error {
 	name := StreamName(projectID)
-	subjects := []string{fmt.Sprintf("events.database.*.project-%s.>", projectID)}
+	subjects := []string{
+		fmt.Sprintf("events.database.*.project-%s.>", projectID),
+		fmt.Sprintf("events.storage.*.project-%s.>", projectID),
+	}
 
 	cfg := &nats.StreamConfig{
 		Name:       name,
