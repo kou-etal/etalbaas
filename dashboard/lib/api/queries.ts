@@ -25,6 +25,21 @@ export const queryKeys = {
     list: (projectId: string) =>
       [...queryKeys.secrets.all, "list", projectId] as const,
   },
+  database: {
+    all: ["database"] as const,
+    tables: (projectId: string) =>
+      [...queryKeys.database.all, "tables", projectId] as const,
+    table: (projectId: string, tableId: number) =>
+      [...queryKeys.database.all, "table", projectId, tableId] as const,
+    columns: (projectId: string, tableId: number) =>
+      [...queryKeys.database.all, "columns", projectId, tableId] as const,
+    policies: (projectId: string) =>
+      [...queryKeys.database.all, "policies", projectId] as const,
+    tableData: (projectId: string, table: string) =>
+      [...queryKeys.database.all, "data", projectId, table] as const,
+    rowCount: (projectId: string, table: string) =>
+      [...queryKeys.database.all, "count", projectId, table] as const,
+  },
   storage: {
     all: ["storage"] as const,
     buckets: (projectId: string) =>

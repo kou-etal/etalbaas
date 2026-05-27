@@ -249,6 +249,17 @@ interface UserInfo {
   tenantId: string;
 }
 
+export interface StorageObject {
+  id: string;
+  bucket_id: string;
+  name: string;
+  size: number | null;
+  mime_type: string | null;
+  etag: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 // --- Service clients ---
 
 // Project Service
@@ -319,4 +330,277 @@ export const storageClient = {
 export const tenantClient = {
   getMe: (input: Record<string, unknown> = {}) =>
     rpc<{ user: UserInfo }>("etalbaas.tenant.v1.TenantService", "GetMe", input),
+};
+
+// Storage REST (dashboard file operations via JWT auth)
+async function storageRest<T>(method: string, path: string, body?: BodyInit | null, extraHeaders?: Record<string, string>): Promise<T> {
+  const url = `${API_BASE_URL}${path}`;
+  const authHeaders = await getAuthHeaders();
+
+  const response = await fetch(url, {
+    method,
+    headers: {
+      ...authHeaders,
+      ...extraHeaders,
+    },
+    body,
+  });
+
+  if (!response.ok) {
+    throw new Error(`Storage ${method} ${path} failed with status ${response.status}`);
+  }
+
+  const text = await response.text();
+  if (!text) return {} as T;
+  return JSON.parse(text) as T;
+}
+
+// --- postgres-meta client (DDL / Schema → /api/database proxy) ---
+
+async function pgMetaFetch<T>(
+  method: string,
+  projectId: string,
+  path: string,
+  body?: unknown,
+): Promise<T> {
+  const params = new URLSearchParams({ project_id: projectId });
+  const url = `/api/database/${path.replace(/^\//, "")}?${params}`;
+  const authHeaders = await getAuthHeaders();
+
+  const response = await fetch(url, {
+    method,
+    headers: {
+      "Content-Type": "application/json",
+      ...authHeaders,
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || `pgMeta ${method} ${path} failed with status ${response.status}`);
+  }
+
+  const text = await response.text();
+  if (!text) return [] as unknown as T;
+  return JSON.parse(text) as T;
+}
+
+export interface PgTable {
+  id: number;
+  schema: string;
+  name: string;
+  rls_enabled: boolean;
+  rls_forced: boolean;
+  replica_identity: string;
+  bytes: number;
+  size: string;
+  live_rows_estimate: number;
+  dead_rows_estimate: number;
+  comment: string | null;
+  columns: PgColumn[];
+  primary_keys: { schema: string; table_name: string; name: string }[];
+}
+
+export interface PgColumn {
+  table_id: number;
+  schema: string;
+  table: string;
+  id: string;
+  ordinal_position: number;
+  name: string;
+  default_value: string | null;
+  data_type: string;
+  format: string;
+  is_identity: boolean;
+  identity_generation: string | null;
+  is_generated: boolean;
+  is_nullable: boolean;
+  is_updatable: boolean;
+  is_unique: boolean;
+  enums: string[];
+  comment: string | null;
+}
+
+export interface PgPolicy {
+  id: number;
+  schema: string;
+  table: string;
+  table_id: number;
+  name: string;
+  action: string;
+  roles: string[];
+  command: string;
+  definition: string;
+  check: string | null;
+}
+
+export interface PgIndex {
+  id: number;
+  table_id: number;
+  schema: string;
+  table: string;
+  name: string;
+  columns: string;
+  comment: string | null;
+}
+
+// postgres-meta /query returns a plain array of row objects (e.g. [{ "result": 1 }])
+export type QueryResult = Record<string, unknown>[];
+
+export const pgMetaClient = {
+  // Tables
+  listTables: (projectId: string) =>
+    pgMetaFetch<PgTable[]>("GET", projectId, "tables"),
+  getTable: (projectId: string, tableId: number) =>
+    pgMetaFetch<PgTable>("GET", projectId, `tables/${tableId}`),
+  createTable: (projectId: string, body: { name: string; schema?: string; comment?: string }) =>
+    pgMetaFetch<PgTable>("POST", projectId, "tables", body),
+  updateTable: (projectId: string, tableId: number, body: { name?: string; rls_enabled?: boolean; comment?: string }) =>
+    pgMetaFetch<PgTable>("PATCH", projectId, `tables/${tableId}`, body),
+  deleteTable: (projectId: string, tableId: number) =>
+    pgMetaFetch<PgTable>("DELETE", projectId, `tables/${tableId}`),
+
+  // Columns — postgres-meta doesn't filter by table_id server-side,
+  // so we always fetch all columns. Filtering is done in the hook.
+  listColumns: (projectId: string, _tableId?: number) =>
+    pgMetaFetch<PgColumn[]>("GET", projectId, "columns"),
+  createColumn: (projectId: string, body: { table_id: number; name: string; type: string; default_value?: string; is_nullable?: boolean; is_unique?: boolean; comment?: string }) =>
+    pgMetaFetch<PgColumn>("POST", projectId, "columns", body),
+  updateColumn: (projectId: string, columnId: string, body: { name?: string; type?: string; default_value?: string; is_nullable?: boolean; comment?: string }) =>
+    pgMetaFetch<PgColumn>("PATCH", projectId, `columns/${columnId}`, body),
+  deleteColumn: (projectId: string, columnId: string) =>
+    pgMetaFetch<PgColumn>("DELETE", projectId, `columns/${columnId}`),
+
+  // Policies (RLS)
+  listPolicies: (projectId: string) =>
+    pgMetaFetch<PgPolicy[]>("GET", projectId, "policies"),
+  createPolicy: (projectId: string, body: { name: string; table: string; schema?: string; definition: string; check?: string; action?: string; command?: string; roles?: string[] }) =>
+    pgMetaFetch<PgPolicy>("POST", projectId, "policies", body),
+  updatePolicy: (projectId: string, policyId: number, body: { name?: string; definition?: string; check?: string; roles?: string[] }) =>
+    pgMetaFetch<PgPolicy>("PATCH", projectId, `policies/${policyId}`, body),
+  deletePolicy: (projectId: string, policyId: number) =>
+    pgMetaFetch<PgPolicy>("DELETE", projectId, `policies/${policyId}`),
+
+  // SQL Editor
+  executeQuery: (projectId: string, query: string) =>
+    pgMetaFetch<QueryResult>("POST", projectId, "query", { query }),
+};
+
+// --- PostgREST data client (DML → /api/postgrest proxy, SQL injection safe) ---
+
+async function postgrestFetch<T>(
+  method: string,
+  projectId: string,
+  path: string,
+  body?: unknown,
+  extraHeaders?: Record<string, string>,
+): Promise<T> {
+  const params = new URLSearchParams({ project_id: projectId });
+  // path may contain query params (e.g. /users?id=eq.1), merge with project_id
+  const [basePath, queryString] = path.replace(/^\//, "").split("?");
+  if (queryString) {
+    const existing = new URLSearchParams(queryString);
+    existing.forEach((v, k) => params.set(k, v));
+  }
+  const url = `/api/postgrest/${basePath}?${params}`;
+  const authHeaders = await getAuthHeaders();
+
+  const response = await fetch(url, {
+    method,
+    headers: {
+      "Content-Type": "application/json",
+      ...authHeaders,
+      ...extraHeaders,
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || `PostgREST ${method} ${path} failed with status ${response.status}`);
+  }
+
+  // HEAD requests return content-range header for row count
+  if (method === "HEAD") {
+    const contentRange = response.headers.get("content-range");
+    // Format: "0-24/100" or "*/100"
+    const total = contentRange?.split("/")[1];
+    return (total ? parseInt(total, 10) : 0) as unknown as T;
+  }
+
+  const text = await response.text();
+  if (!text) return [] as unknown as T;
+  return JSON.parse(text) as T;
+}
+
+export const postgrestDataClient = {
+  getTableData: (projectId: string, table: string, limit = 50, offset = 0) =>
+    postgrestFetch<Record<string, unknown>[]>(
+      "GET",
+      projectId,
+      `/${table}?limit=${limit}&offset=${offset}`,
+    ),
+
+  insertRow: (projectId: string, table: string, data: Record<string, unknown>) =>
+    postgrestFetch<Record<string, unknown>>(
+      "POST",
+      projectId,
+      `/${table}`,
+      data,
+      { Prefer: "return=representation" },
+    ),
+
+  updateRow: (projectId: string, table: string, pkCol: string, pkVal: unknown, data: Record<string, unknown>) =>
+    postgrestFetch<Record<string, unknown>>(
+      "PATCH",
+      projectId,
+      `/${table}?${pkCol}=eq.${encodeURIComponent(String(pkVal))}`,
+      data,
+      { Prefer: "return=representation" },
+    ),
+
+  deleteRow: (projectId: string, table: string, pkCol: string, pkVal: unknown) =>
+    postgrestFetch<Record<string, unknown>>(
+      "DELETE",
+      projectId,
+      `/${table}?${pkCol}=eq.${encodeURIComponent(String(pkVal))}`,
+    ),
+
+  getRowCount: (projectId: string, table: string) =>
+    postgrestFetch<number>("HEAD", projectId, `/${table}`, null, {
+      Prefer: "count=exact",
+    }),
+};
+
+export const storageRestClient = {
+  listObjects: (projectId: string, bucket: string, limit?: number, offset?: number) => {
+    const params = new URLSearchParams({ project_id: projectId, bucket });
+    if (limit) params.set("limit", String(limit));
+    if (offset) params.set("offset", String(offset));
+    return storageRest<StorageObject[]>("GET", `/storage/v1/dashboard/objects?${params}`);
+  },
+
+  uploadObject: async (projectId: string, bucket: string, path: string, file: File) => {
+    const params = new URLSearchParams({ project_id: projectId, bucket, path });
+    return storageRest<StorageObject>("POST", `/storage/v1/dashboard/upload?${params}`, file, {
+      "Content-Type": file.type || "application/octet-stream",
+    });
+  },
+
+  downloadObject: async (projectId: string, bucket: string, path: string): Promise<Response> => {
+    const params = new URLSearchParams({ project_id: projectId, bucket, path });
+    const url = `${API_BASE_URL}/storage/v1/dashboard/download?${params}`;
+    const authHeaders = await getAuthHeaders();
+    const response = await fetch(url, { headers: authHeaders });
+    if (!response.ok) {
+      throw new Error(`Download failed with status ${response.status}`);
+    }
+    return response;
+  },
+
+  deleteObject: (projectId: string, bucket: string, path: string) => {
+    const params = new URLSearchParams({ project_id: projectId, bucket, path });
+    return storageRest<{ status: string }>("DELETE", `/storage/v1/dashboard/delete?${params}`);
+  },
 };

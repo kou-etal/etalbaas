@@ -11,6 +11,7 @@ export interface ApiKey {
   role: string;
   status?: string;
   expiresAt?: string;
+  revokedAt?: string;
   createdAt: string;
 }
 
