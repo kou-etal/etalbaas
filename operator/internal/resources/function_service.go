@@ -102,6 +102,12 @@ func DesiredFunctionHTTPRoute(fn *etalbaasv1alpha1.Function, cfg config.Operator
 }
 
 func hasHTTPTrigger(fn *etalbaasv1alpha1.Function) bool {
+	// light-deployment and heavy-deployment functions always have implicit HTTP access.
+	// Only heavy-job functions require an explicit Http trigger.
+	if fn.Spec.Kind == etalbaasv1alpha1.FunctionKindLightDeployment ||
+		fn.Spec.Kind == etalbaasv1alpha1.FunctionKindHeavyDeployment {
+		return true
+	}
 	for _, trigger := range fn.Spec.Triggers {
 		if trigger.Type == "Http" {
 			return true

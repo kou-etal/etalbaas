@@ -90,9 +90,9 @@ func DesiredPostgRESTDeployment(project *etalbaasv1alpha1.Project, cfg config.Op
 									ValueFrom: &corev1.EnvVarSource{
 										SecretKeyRef: &corev1.SecretKeySelector{
 											LocalObjectReference: corev1.LocalObjectReference{
-												Name: "project-jwt-secret",
+												Name: "jwt-verification-key",
 											},
-											Key: "secret",
+											Key: "jwk",
 										},
 									},
 								},

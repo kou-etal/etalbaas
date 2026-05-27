@@ -18,12 +18,14 @@ func HTTPRouteGVK() schema.GroupVersionKind {
 }
 
 const (
-	gatewayAPIVersion    = "gateway.networking.k8s.io/v1"
-	httpRouteKind        = "HTTPRoute"
+	gatewayAPIVersion = "gateway.networking.k8s.io/v1"
+	httpRouteKind     = "HTTPRoute"
 )
 
 // DesiredHTTPRoute builds the desired Gateway API HTTPRoute for the project's REST API.
-// Routes: {subdomain}.api.{domain} → PostgREST service
+// Routes:
+//   - /rest/v1/* → PostgREST (prefix stripped via URLRewrite)
+//   - /auth/*    → GoTrue    (prefix stripped via URLRewrite)
 func DesiredHTTPRoute(project *etalbaasv1alpha1.Project, cfg config.OperatorConfig) *unstructured.Unstructured {
 	pr := project.Spec.Stack.PostgREST
 	if pr == nil || !pr.Enabled {
@@ -54,12 +56,24 @@ func DesiredHTTPRoute(project *etalbaasv1alpha1.Project, cfg config.OperatorConf
 				},
 				"hostnames": []interface{}{hostname},
 				"rules": []interface{}{
+					// PostgREST: /rest/v1/* → PostgREST (strip /rest/v1 prefix)
 					map[string]interface{}{
 						"matches": []interface{}{
 							map[string]interface{}{
 								"path": map[string]interface{}{
 									"type":  "PathPrefix",
-									"value": "/rest",
+									"value": "/rest/v1",
+								},
+							},
+						},
+						"filters": []interface{}{
+							map[string]interface{}{
+								"type": "URLRewrite",
+								"urlRewrite": map[string]interface{}{
+									"path": map[string]interface{}{
+										"type":               "ReplacePrefixMatch",
+										"replacePrefixMatch": "/",
+									},
 								},
 							},
 						},
@@ -67,6 +81,34 @@ func DesiredHTTPRoute(project *etalbaasv1alpha1.Project, cfg config.OperatorConf
 							map[string]interface{}{
 								"name": "postgrest",
 								"port": int64(3000),
+							},
+						},
+					},
+					// GoTrue: /auth/* → GoTrue (strip /auth prefix)
+					map[string]interface{}{
+						"matches": []interface{}{
+							map[string]interface{}{
+								"path": map[string]interface{}{
+									"type":  "PathPrefix",
+									"value": "/auth",
+								},
+							},
+						},
+						"filters": []interface{}{
+							map[string]interface{}{
+								"type": "URLRewrite",
+								"urlRewrite": map[string]interface{}{
+									"path": map[string]interface{}{
+										"type":               "ReplacePrefixMatch",
+										"replacePrefixMatch": "/",
+									},
+								},
+							},
+						},
+						"backendRefs": []interface{}{
+							map[string]interface{}{
+								"name": "gotrue",
+								"port": int64(9999),
 							},
 						},
 					},

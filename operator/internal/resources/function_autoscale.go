@@ -32,14 +32,15 @@ func KEDAHTTPScaledObjectGVK() schema.GroupVersionKind {
 }
 
 // DesiredKEDAScaledObject builds the desired KEDA ScaledObject for a heavy-deployment Function
-// with a DatabaseChange trigger. Uses nats-jetstream trigger based on consumer pending count.
-// Returns nil if the function is not heavy-deployment or has no DatabaseChange trigger.
+// with an event-driven trigger (DatabaseChange or ObjectStorage). Uses nats-jetstream trigger
+// based on consumer pending count.
+// Returns nil if the function is not heavy-deployment or has no event trigger.
 func DesiredKEDAScaledObject(fn *etalbaasv1alpha1.Function, cfg config.OperatorConfig) *unstructured.Unstructured {
 	if fn.Spec.Kind != etalbaasv1alpha1.FunctionKindHeavyDeployment {
 		return nil
 	}
 
-	if !HasDatabaseChangeTrigger(fn) {
+	if !HasEventTrigger(fn) {
 		return nil
 	}
 
@@ -158,8 +159,8 @@ func DesiredHTTPScaledObject(fn *etalbaasv1alpha1.Function, cfg config.OperatorC
 		return nil
 	}
 
-	// Heavy-deployment with DatabaseChange uses ScaledObject (nats-jetstream), not HTTPScaledObject.
-	if HasDatabaseChangeTrigger(fn) {
+	// Heavy-deployment with event triggers uses ScaledObject (nats-jetstream), not HTTPScaledObject.
+	if HasEventTrigger(fn) {
 		return nil
 	}
 
@@ -220,6 +221,21 @@ func HasDatabaseChangeTrigger(fn *etalbaasv1alpha1.Function) bool {
 		}
 	}
 	return false
+}
+
+// HasObjectStorageTrigger returns true if the function has any valid ObjectStorage trigger.
+func HasObjectStorageTrigger(fn *etalbaasv1alpha1.Function) bool {
+	for _, t := range fn.Spec.Triggers {
+		if t.Type == "ObjectStorage" && t.ObjectStorage != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// HasEventTrigger returns true if the function has any event-driven trigger (DB or Storage).
+func HasEventTrigger(fn *etalbaasv1alpha1.Function) bool {
+	return HasDatabaseChangeTrigger(fn) || HasObjectStorageTrigger(fn)
 }
 
 // hasHTTPTrigger is defined in function_service.go
