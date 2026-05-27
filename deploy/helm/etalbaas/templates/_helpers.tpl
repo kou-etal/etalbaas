@@ -98,6 +98,11 @@ Provides PORT, METRICS_PORT, ENV, OTEL endpoint, DATABASE_URL.
     secretKeyRef:
       name: {{ .Values.secrets.platformSecretName }}
       key: DATABASE_URL
+- name: JWT_SECRET
+  valueFrom:
+    secretKeyRef:
+      name: {{ .Values.secrets.platformSecretName }}
+      key: JWT_SECRET
 {{- end }}
 
 {{/*

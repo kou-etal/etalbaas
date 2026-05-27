@@ -47,10 +47,12 @@ spec:
               value: {{ .Values.global.baseDomain | quote }}
             - name: REGISTRY_ENDPOINT
               value: {{ printf "zot.%s.svc:5000" (include "etalbaas.namespace" .) | quote }}
+            - name: REGISTRY_INSECURE
+              value: {{ .Values.operator.config.registryInsecure | default false | quote }}
             - name: NATS_ENDPOINT
               value: {{ printf "nats.%s.svc:4222" (include "etalbaas.namespace" .) | quote }}
             - name: NATS_MONITORING_ENDPOINT
-              value: {{ printf "nats.%s.svc:8222" (include "etalbaas.namespace" .) | quote }}
+              value: {{ printf "nats-headless.%s.svc:8222" (include "etalbaas.namespace" .) | quote }}
             - name: GATEWAY_NAME
               value: {{ .Values.operator.config.gatewayName | quote }}
             - name: GATEWAY_NAMESPACE
@@ -69,6 +71,21 @@ spec:
               value: {{ .Values.operator.config.buildTimeoutMinutes | quote }}
             - name: DISPATCHER_IMAGE
               value: {{ .Values.operator.config.dispatcherImage | quote }}
+            - name: POSTGRES_META_IMAGE
+              value: {{ .Values.operator.config.postgresMetaImage | quote }}
+            - name: GOTRUE_IMAGE
+              value: {{ .Values.operator.config.gotrueImage | quote }}
+            - name: SANDBOX_RUNTIME_CLASS
+              value: {{ .Values.operator.config.sandboxRuntimeClass | default "" | quote }}
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.platformSecretName }}
+                  key: JWT_SECRET
+            - name: MAX_TOTAL_PROJECTS
+              value: {{ .Values.operator.config.maxTotalProjects | quote }}
+            - name: MAX_CONCURRENT_BUILDS
+              value: {{ .Values.operator.config.maxConcurrentBuilds | quote }}
             - name: FREE_PLAN_CPU
               value: {{ .Values.operator.config.freePlanQuota.cpu | quote }}
             - name: FREE_PLAN_MEMORY

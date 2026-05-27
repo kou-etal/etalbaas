@@ -17,6 +17,7 @@ spec:
     allowMethods:
       - POST
       - GET
+      - DELETE
       - OPTIONS
     allowHeaders:
       - content-type

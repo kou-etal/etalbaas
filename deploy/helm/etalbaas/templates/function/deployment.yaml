@@ -38,6 +38,20 @@ spec:
             {{- include "etalbaas.commonEnv" . | nindent 12 }}
             - name: K8S_ENABLED
               value: {{ .Values.services.function.k8sEnabled | quote }}
+            {{- if .Values.gpu.enabled }}
+            - name: GPU_ENABLED
+              value: "true"
+            - name: PLATFORM_NAMESPACE
+              value: {{ include "etalbaas.namespace" . }}
+            - name: DISPATCHER_IMAGE
+              value: {{ .Values.operator.config.dispatcherImage | quote }}
+            - name: SANDBOX_RUNTIME_CLASS
+              value: {{ .Values.operator.config.sandboxRuntimeClass | quote }}
+            {{- if .Values.gpu.providers.runpod.enabled }}
+            - name: GPU_API_KEY_SECRET
+              value: {{ .Values.gpu.providers.runpod.apiKeySecret | quote }}
+            {{- end }}
+            {{- end }}
           securityContext:
             {{- include "etalbaas.containerSecurityContext" . | nindent 12 }}
           resources:

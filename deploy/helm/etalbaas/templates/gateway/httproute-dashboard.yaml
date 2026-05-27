@@ -54,11 +54,19 @@ spec:
       backendRefs:
         - name: event
           port: {{ .Values.services.common.port }}
-    # Storage Service
+    # Storage Service (gRPC: bucket management)
     - matches:
         - path:
             type: PathPrefix
             value: /etalbaas.storage.v1.StorageService
+      backendRefs:
+        - name: storage
+          port: {{ .Values.services.common.port }}
+    # Storage Service (REST: dashboard file operations)
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /storage/v1/dashboard
       backendRefs:
         - name: storage
           port: {{ .Values.services.common.port }}

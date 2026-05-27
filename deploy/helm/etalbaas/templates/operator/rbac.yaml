@@ -49,7 +49,11 @@ rules:
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   # Gateway API
   - apiGroups: ["gateway.networking.k8s.io"]
-    resources: ["httproutes", "tlsroutes"]
+    resources: ["httproutes", "tlsroutes", "referencegrants"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Envoy Gateway (BackendTrafficPolicy for GPU timeout)
+  - apiGroups: ["gateway.envoyproxy.io"]
+    resources: ["backendtrafficpolicies"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   # CloudNativePG
   - apiGroups: ["postgresql.cnpg.io"]

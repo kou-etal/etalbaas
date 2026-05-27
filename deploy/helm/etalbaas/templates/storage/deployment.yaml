@@ -38,6 +38,8 @@ spec:
             {{- include "etalbaas.commonEnv" . | nindent 12 }}
             - name: K8S_ENABLED
               value: {{ if hasKey .Values.services.storage "k8sEnabled" }}{{ .Values.services.storage.k8sEnabled | quote }}{{ else }}"true"{{ end }}
+            - name: NATS_URL
+              value: {{ .Values.services.storage.natsUrl | default "" | quote }}
             - name: S3_ENDPOINT
               value: {{ .Values.services.storage.s3.endpoint | quote }}
             - name: S3_BUCKET

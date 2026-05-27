@@ -20,6 +20,16 @@ rules:
   - apiGroups: ["etalbaas.io"]
     resources: ["functions/status"]
     verbs: ["get", "update", "patch"]
+  {{- if .Values.gpu.enabled }}
+  # GPU invoke: create Dispatcher Jobs, watch completion, read/delete result ConfigMaps
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "delete"]
+  # Note: secrets get removed — kubelet resolves SecretKeyRef without SA permission
+  {{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
