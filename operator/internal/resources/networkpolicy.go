@@ -99,8 +99,89 @@ func DesiredAllowPlatformNetworkPolicy(project *etalbaasv1alpha1.Project, platfo
 	}
 }
 
+// DesiredAllowCNPGNetworkPolicy creates a NetworkPolicy allowing ingress from
+// the cnpg-system namespace. The CNPG controller needs to reach PostgreSQL pods
+// on port 8000 to extract instance status via the /pg/status endpoint.
+func DesiredAllowCNPGNetworkPolicy(project *etalbaasv1alpha1.Project) *networkingv1.NetworkPolicy {
+	namespace := "project-" + project.Name
+	projectID := project.Name
+	userID := project.Labels[LabelUserID]
+	plan := project.Spec.Plan
+
+	statusPort := intstr.FromInt32(8000)
+	tcp := corev1.ProtocolTCP
+
+	return &networkingv1.NetworkPolicy{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "allow-cnpg-controller",
+			Namespace: namespace,
+			Labels:    ComponentLabels(projectID, userID, plan, "networkpolicy"),
+		},
+		Spec: networkingv1.NetworkPolicySpec{
+			PodSelector: metav1.LabelSelector{},
+			PolicyTypes: []networkingv1.PolicyType{
+				networkingv1.PolicyTypeIngress,
+			},
+			Ingress: []networkingv1.NetworkPolicyIngressRule{
+				{
+					From: []networkingv1.NetworkPolicyPeer{
+						{
+							NamespaceSelector: &metav1.LabelSelector{
+								MatchLabels: map[string]string{
+									"kubernetes.io/metadata.name": "cnpg-system",
+								},
+							},
+						},
+					},
+					Ports: []networkingv1.NetworkPolicyPort{
+						{Protocol: &tcp, Port: &statusPort},
+					},
+				},
+			},
+		},
+	}
+}
+
+// DesiredAllowEnvoyGatewayNetworkPolicy creates a NetworkPolicy allowing ingress
+// from the envoy-gateway-system namespace. The Envoy proxy needs to reach function
+// pods on their HTTP ports to forward invocation requests.
+func DesiredAllowEnvoyGatewayNetworkPolicy(project *etalbaasv1alpha1.Project, gatewayNamespace string) *networkingv1.NetworkPolicy {
+	namespace := "project-" + project.Name
+	projectID := project.Name
+	userID := project.Labels[LabelUserID]
+	plan := project.Spec.Plan
+
+	return &networkingv1.NetworkPolicy{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "allow-envoy-gateway",
+			Namespace: namespace,
+			Labels:    ComponentLabels(projectID, userID, plan, "networkpolicy"),
+		},
+		Spec: networkingv1.NetworkPolicySpec{
+			PodSelector: metav1.LabelSelector{},
+			PolicyTypes: []networkingv1.PolicyType{
+				networkingv1.PolicyTypeIngress,
+			},
+			Ingress: []networkingv1.NetworkPolicyIngressRule{
+				{
+					From: []networkingv1.NetworkPolicyPeer{
+						{
+							NamespaceSelector: &metav1.LabelSelector{
+								MatchLabels: map[string]string{
+									"kubernetes.io/metadata.name": gatewayNamespace,
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
 // DesiredEgressNetworkPolicy creates a NetworkPolicy restricting egress traffic.
-// Allows: DNS (kube-system:53), HTTPS (443), intra-namespace, NATS (platform-system:4222).
+// Allows: DNS (kube-system:53), HTTPS (443), intra-namespace,
+//         NATS (platform-system:4222), Storage REST (platform-system:8080).
 // Blocks: cloud metadata services (169.254.169.254, etc.) to prevent IAM token theft.
 func DesiredEgressNetworkPolicy(project *etalbaasv1alpha1.Project, platformNamespace string) *networkingv1.NetworkPolicy {
 	namespace := "project-" + project.Name
@@ -111,6 +192,7 @@ func DesiredEgressNetworkPolicy(project *etalbaasv1alpha1.Project, platformNames
 	dnsPort := intstr.FromInt32(53)
 	httpsPort := intstr.FromInt32(443)
 	natsPort := intstr.FromInt32(4222)
+	storagePort := intstr.FromInt32(8080)
 	udp := corev1.ProtocolUDP
 	tcp := corev1.ProtocolTCP
 
@@ -169,7 +251,7 @@ func DesiredEgressNetworkPolicy(project *etalbaasv1alpha1.Project, platformNames
 						},
 					},
 				},
-				// Allow NATS in platform-system
+				// Allow NATS + Storage REST in platform-system
 				{
 					To: []networkingv1.NetworkPolicyPeer{
 						{
@@ -182,6 +264,7 @@ func DesiredEgressNetworkPolicy(project *etalbaasv1alpha1.Project, platformNames
 					},
 					Ports: []networkingv1.NetworkPolicyPort{
 						{Protocol: &tcp, Port: &natsPort},
+						{Protocol: &tcp, Port: &storagePort},
 					},
 				},
 			},
