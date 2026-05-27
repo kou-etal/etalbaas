@@ -3,7 +3,10 @@ package controller
 import (
 	"context"
 	"crypto/rand"
+	"crypto/rsa"
+	"encoding/hex"
 	"fmt"
+	"strings"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -72,8 +75,33 @@ func (r *ProjectReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		}
 	}
 
-	// 3. Set phase to Provisioning if Pending
-	if project.Status.Phase == "" || project.Status.Phase == etalbaasv1alpha1.ProjectPhasePending {
+	// 3. Enforce global project total limit
+	if r.Config.MaxTotalProjects > 0 && (project.Status.Phase == "" || project.Status.Phase == etalbaasv1alpha1.ProjectPhasePending) {
+		var projectList etalbaasv1alpha1.ProjectList
+		if err := r.List(ctx, &projectList, client.InNamespace(r.Config.PlatformNamespace)); err != nil {
+			return ctrl.Result{}, fmt.Errorf("list projects for quota check: %w", err)
+		}
+		// Count non-deleting projects (exclude this one from the count)
+		activeCount := 0
+		for i := range projectList.Items {
+			p := &projectList.Items[i]
+			if p.DeletionTimestamp.IsZero() && p.Name != project.Name {
+				activeCount++
+			}
+		}
+		if activeCount >= r.Config.MaxTotalProjects {
+			logger.Info("global project limit reached, queueing project",
+				"active", activeCount, "limit", r.Config.MaxTotalProjects)
+			project.Status.Phase = etalbaasv1alpha1.ProjectPhaseQueued
+			if err := r.Status().Update(ctx, &project); err != nil {
+				return ctrl.Result{}, err
+			}
+			return ctrl.Result{RequeueAfter: 60 * time.Second}, nil
+		}
+	}
+
+	// 4. Set phase to Provisioning if Pending
+	if project.Status.Phase == "" || project.Status.Phase == etalbaasv1alpha1.ProjectPhasePending || project.Status.Phase == etalbaasv1alpha1.ProjectPhaseQueued {
 		project.Status.Phase = etalbaasv1alpha1.ProjectPhaseProvisioning
 		if err := r.Status().Update(ctx, &project); err != nil {
 			return ctrl.Result{}, err
@@ -122,9 +150,29 @@ func (r *ProjectReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return r.setFailed(ctx, &project, "RedisFailed", err)
 	}
 
+	if err := r.reconcileJWTSecret(ctx, &project); err != nil {
+		logger.Error(err, "failed to reconcile JWT secret")
+		return r.setFailed(ctx, &project, "JWTSecretFailed", err)
+	}
+
+	if err := r.reconcileJWTKeys(ctx, &project); err != nil {
+		logger.Error(err, "failed to reconcile JWT keys")
+		return r.setFailed(ctx, &project, "JWTKeysFailed", err)
+	}
+
 	if err := r.reconcilePostgREST(ctx, &project); err != nil {
 		logger.Error(err, "failed to reconcile PostgREST")
 		return r.setFailed(ctx, &project, "PostgRESTFailed", err)
+	}
+
+	if err := r.reconcilePostgresMeta(ctx, &project); err != nil {
+		logger.Error(err, "failed to reconcile postgres-meta")
+		return r.setFailed(ctx, &project, "PostgresMetaFailed", err)
+	}
+
+	if err := r.reconcileGoTrue(ctx, &project); err != nil {
+		logger.Error(err, "failed to reconcile GoTrue")
+		return r.setFailed(ctx, &project, "GoTrueFailed", err)
 	}
 
 	if err := r.reconcileHTTPRoute(ctx, &project); err != nil {
@@ -205,6 +253,8 @@ func (r *ProjectReconciler) reconcileNetworkPolicies(ctx context.Context, projec
 		resources.DesiredDefaultDenyNetworkPolicy(project),
 		resources.DesiredAllowIntraNamespaceNetworkPolicy(project),
 		resources.DesiredAllowPlatformNetworkPolicy(project, r.Config.PlatformNamespace),
+		resources.DesiredAllowCNPGNetworkPolicy(project),
+		resources.DesiredAllowEnvoyGatewayNetworkPolicy(project, "envoy-gateway-system"),
 		resources.DesiredEgressNetworkPolicy(project, r.Config.PlatformNamespace),
 	}
 
@@ -309,6 +359,26 @@ func (r *ProjectReconciler) reconcilePostgREST(ctx context.Context, project *eta
 	return nil
 }
 
+func (r *ProjectReconciler) reconcilePostgresMeta(ctx context.Context, project *etalbaasv1alpha1.Project) error {
+	namespace := "project-" + project.Name
+
+	deploy := resources.DesiredPostgresMetaDeployment(project, r.Config)
+	if deploy != nil {
+		if err := r.reconcileNamespacedResource(ctx, project, deploy); err != nil {
+			return err
+		}
+	} else {
+		r.deleteIfExists(ctx, &appsv1.Deployment{}, namespace, "postgres-meta")
+	}
+
+	svc := resources.DesiredPostgresMetaService(project)
+	if svc != nil {
+		return r.reconcileNamespacedResource(ctx, project, svc)
+	}
+	r.deleteIfExists(ctx, &corev1.Service{}, namespace, "postgres-meta")
+	return nil
+}
+
 func (r *ProjectReconciler) reconcileHTTPRoute(ctx context.Context, project *etalbaasv1alpha1.Project) error {
 	route := resources.DesiredHTTPRoute(project, r.Config)
 	if route == nil {
@@ -386,6 +456,257 @@ func (r *ProjectReconciler) reconcileCDCSecret(ctx context.Context, project *eta
 	return r.Create(ctx, secret)
 }
 
+// reconcileJWTSecret creates the project-jwt-secret Secret for GoTrue's GOTRUE_JWT_SECRET.
+// Each project gets a unique random symmetric key to prevent cross-project JWT forgery.
+func (r *ProjectReconciler) reconcileJWTSecret(ctx context.Context, project *etalbaasv1alpha1.Project) error {
+	namespace := "project-" + project.Name
+	pg := project.Spec.Stack.Postgres
+	if pg == nil || !pg.Enabled {
+		r.deleteIfExists(ctx, &corev1.Secret{}, namespace, "project-jwt-secret")
+		return nil
+	}
+
+	// Idempotent: only create if absent.
+	existing := &corev1.Secret{}
+	err := r.Get(ctx, types.NamespacedName{Name: "project-jwt-secret", Namespace: namespace}, existing)
+	if err == nil {
+		return nil
+	}
+	if !apierrors.IsNotFound(err) {
+		return fmt.Errorf("check JWT secret: %w", err)
+	}
+
+	// Generate a unique 32-byte random secret per project.
+	secretBytes := make([]byte, 32)
+	if _, err := rand.Read(secretBytes); err != nil {
+		return fmt.Errorf("generate JWT secret: %w", err)
+	}
+
+	userID := project.Labels[resources.LabelUserID]
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "project-jwt-secret",
+			Namespace: namespace,
+			Labels:    resources.ComponentLabels(project.Name, userID, project.Spec.Plan, "postgrest"),
+		},
+		Type: corev1.SecretTypeOpaque,
+		StringData: map[string]string{
+			"secret": hex.EncodeToString(secretBytes),
+		},
+	}
+
+	return r.Create(ctx, secret)
+}
+
+// reconcileJWTKeys generates RSA key pair and pre-signed JWTs for GoTrue RS256 authentication.
+// Creates four Secrets in the project namespace (idempotent, skips if gotrue-jwt-keys already exists):
+//   - gotrue-jwt-keys: JWK Set (private key) for GoTrue GOTRUE_JWT_KEYS
+//   - jwt-verification-key: JWK (public key) for PostgREST PGRST_JWT_SECRET
+//   - service-role-key: RS256 signed JWT with role=service_role
+//   - anon-key: RS256 signed JWT with role=anon
+func (r *ProjectReconciler) reconcileJWTKeys(ctx context.Context, project *etalbaasv1alpha1.Project) error {
+	namespace := "project-" + project.Name
+	pg := project.Spec.Stack.Postgres
+	if pg == nil || !pg.Enabled {
+		return nil
+	}
+
+	// Check if gotrue-jwt-keys already exists (idempotent).
+	existing := &corev1.Secret{}
+	var rsaKey *rsa.PrivateKey
+	err := r.Get(ctx, types.NamespacedName{Name: "gotrue-jwt-keys", Namespace: namespace}, existing)
+	if err == nil {
+		// Keys already exist. Ensure derived Secrets also exist.
+		jwkSetData := existing.Data["jwk-set"]
+		if len(jwkSetData) == 0 {
+			return fmt.Errorf("gotrue-jwt-keys Secret exists but jwk-set is empty")
+		}
+		rsaKey, err = resources.ParseRSAPrivateKeyFromJWKSet(jwkSetData)
+		if err != nil {
+			return fmt.Errorf("parse RSA key from existing Secret: %w", err)
+		}
+	} else if !apierrors.IsNotFound(err) {
+		return fmt.Errorf("check gotrue-jwt-keys: %w", err)
+	} else {
+		// Generate new RSA key pair.
+		rsaKey, err = resources.GenerateRSAKeyPair()
+		if err != nil {
+			return fmt.Errorf("generate RSA key pair: %w", err)
+		}
+
+		jwkSet, err := resources.PrivateKeyToJWKSet(rsaKey)
+		if err != nil {
+			return fmt.Errorf("convert key to JWK Set: %w", err)
+		}
+
+		userID := project.Labels[resources.LabelUserID]
+		secret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "gotrue-jwt-keys",
+				Namespace: namespace,
+				Labels:    resources.ComponentLabels(project.Name, userID, project.Spec.Plan, "gotrue"),
+			},
+			Type: corev1.SecretTypeOpaque,
+			Data: map[string][]byte{
+				"jwk-set": jwkSet,
+			},
+		}
+		if err := r.Create(ctx, secret); err != nil {
+			return fmt.Errorf("create gotrue-jwt-keys: %w", err)
+		}
+	}
+
+	// Ensure jwt-verification-key (public key for PostgREST).
+	if err := r.ensureJWTVerificationKey(ctx, project, rsaKey); err != nil {
+		return err
+	}
+
+	// Ensure service-role-key.
+	if err := r.ensureRoleKeySecret(ctx, project, rsaKey, "service-role-key", resources.BuildServiceRoleClaims()); err != nil {
+		return err
+	}
+
+	// Ensure anon-key.
+	if err := r.ensureRoleKeySecret(ctx, project, rsaKey, "anon-key", resources.BuildAnonClaims()); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (r *ProjectReconciler) ensureJWTVerificationKey(ctx context.Context, project *etalbaasv1alpha1.Project, rsaKey *rsa.PrivateKey) error {
+	namespace := "project-" + project.Name
+
+	existing := &corev1.Secret{}
+	err := r.Get(ctx, types.NamespacedName{Name: "jwt-verification-key", Namespace: namespace}, existing)
+	if err == nil {
+		return nil
+	}
+	if !apierrors.IsNotFound(err) {
+		return fmt.Errorf("check jwt-verification-key: %w", err)
+	}
+
+	jwk, err := resources.PublicKeyToJWK(&rsaKey.PublicKey)
+	if err != nil {
+		return fmt.Errorf("convert public key to JWK: %w", err)
+	}
+
+	userID := project.Labels[resources.LabelUserID]
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "jwt-verification-key",
+			Namespace: namespace,
+			Labels:    resources.ComponentLabels(project.Name, userID, project.Spec.Plan, "gotrue"),
+		},
+		Type: corev1.SecretTypeOpaque,
+		Data: map[string][]byte{
+			"jwk": jwk,
+		},
+	}
+	return r.Create(ctx, secret)
+}
+
+func (r *ProjectReconciler) ensureRoleKeySecret(ctx context.Context, project *etalbaasv1alpha1.Project, rsaKey *rsa.PrivateKey, secretName string, claims map[string]interface{}) error {
+	namespace := "project-" + project.Name
+
+	existing := &corev1.Secret{}
+	err := r.Get(ctx, types.NamespacedName{Name: secretName, Namespace: namespace}, existing)
+	if err == nil {
+		return nil
+	}
+	if !apierrors.IsNotFound(err) {
+		return fmt.Errorf("check %s: %w", secretName, err)
+	}
+
+	jwt, err := resources.SignRS256JWT(claims, rsaKey, "key1")
+	if err != nil {
+		return fmt.Errorf("sign JWT for %s: %w", secretName, err)
+	}
+
+	userID := project.Labels[resources.LabelUserID]
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      secretName,
+			Namespace: namespace,
+			Labels:    resources.ComponentLabels(project.Name, userID, project.Spec.Plan, "gotrue"),
+		},
+		Type: corev1.SecretTypeOpaque,
+		StringData: map[string]string{
+			"key": jwt,
+		},
+	}
+	return r.Create(ctx, secret)
+}
+
+func (r *ProjectReconciler) reconcileGoTrue(ctx context.Context, project *etalbaasv1alpha1.Project) error {
+	namespace := "project-" + project.Name
+
+	// Create gotrue-db-url Secret with search_path=auth appended to the CNPG db-app URI.
+	// GoTrue needs search_path=auth so its unqualified DDL creates objects in the auth schema.
+	if project.Spec.Stack.Postgres != nil && project.Spec.Stack.Postgres.Enabled {
+		if err := r.ensureGoTrueDBURL(ctx, namespace); err != nil {
+			return err
+		}
+	}
+
+	deploy := resources.DesiredGoTrueDeployment(project, r.Config)
+	if deploy != nil {
+		if err := r.reconcileNamespacedResource(ctx, project, deploy); err != nil {
+			return err
+		}
+	} else {
+		r.deleteIfExists(ctx, &appsv1.Deployment{}, namespace, "gotrue")
+	}
+
+	svc := resources.DesiredGoTrueService(project)
+	if svc != nil {
+		return r.reconcileNamespacedResource(ctx, project, svc)
+	}
+	r.deleteIfExists(ctx, &corev1.Service{}, namespace, "gotrue")
+	return nil
+}
+
+// ensureGoTrueDBURL reads the CNPG db-app Secret and creates a gotrue-db-url Secret
+// with ?search_path=auth appended to the connection URI. GoTrue requires search_path=auth
+// so that its migrations create enum types and objects in the auth schema, not public.
+func (r *ProjectReconciler) ensureGoTrueDBURL(ctx context.Context, namespace string) error {
+	dbAppSecret := &corev1.Secret{}
+	if err := r.Get(ctx, types.NamespacedName{Name: "db-app", Namespace: namespace}, dbAppSecret); err != nil {
+		if apierrors.IsNotFound(err) {
+			// db-app not yet created by CNPG; will be retried on next reconcile
+			return nil
+		}
+		return fmt.Errorf("get db-app secret: %w", err)
+	}
+
+	uri := string(dbAppSecret.Data["uri"])
+	if !strings.Contains(uri, "search_path") {
+		if strings.Contains(uri, "?") {
+			uri += "&search_path=auth"
+		} else {
+			uri += "?search_path=auth"
+		}
+	}
+
+	gotrueDBSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "gotrue-db-url",
+			Namespace: namespace,
+		},
+	}
+
+	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, gotrueDBSecret, func() error {
+		gotrueDBSecret.Data = map[string][]byte{
+			"uri": []byte(uri),
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("create gotrue-db-url secret: %w", err)
+	}
+	return nil
+}
+
 // generateRandomPassword creates a random alphanumeric password.
 func generateRandomPassword(length int) (string, error) {
 	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
@@ -420,7 +741,10 @@ func (r *ProjectReconciler) reconcileUnstructured(ctx context.Context, desired *
 
 	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, existing, func() error {
 		// Copy spec from desired to existing
-		spec, found, _ := unstructured.NestedMap(desired.Object, "spec")
+		spec, found, nestedErr := unstructured.NestedMap(desired.Object, "spec")
+		if nestedErr != nil {
+			return fmt.Errorf("read spec from desired: %w", nestedErr)
+		}
 		if found {
 			if err := unstructured.SetNestedMap(existing.Object, spec, "spec"); err != nil {
 				return err
@@ -544,6 +868,38 @@ func (r *ProjectReconciler) updateStatus(ctx context.Context, project *etalbaasv
 		components.CDC = cdcStatus
 	}
 
+	// Check PostgresMeta
+	if pg := project.Spec.Stack.Postgres; pg != nil && pg.Enabled {
+		metaStatus := &etalbaasv1alpha1.ComponentStatus{Status: "Provisioning"}
+		deploy := &appsv1.Deployment{}
+		if err := r.Get(ctx, types.NamespacedName{Name: "postgres-meta", Namespace: namespace}, deploy); err == nil {
+			if deploy.Status.ReadyReplicas > 0 {
+				metaStatus.Status = "Ready"
+			} else {
+				allReady = false
+			}
+		} else {
+			allReady = false
+		}
+		components.PostgresMeta = metaStatus
+	}
+
+	// Check GoTrue
+	if pg := project.Spec.Stack.Postgres; pg != nil && pg.Enabled {
+		gotrueStatus := &etalbaasv1alpha1.ComponentStatus{Status: "Provisioning"}
+		deploy := &appsv1.Deployment{}
+		if err := r.Get(ctx, types.NamespacedName{Name: "gotrue", Namespace: namespace}, deploy); err == nil {
+			if deploy.Status.ReadyReplicas > 0 {
+				gotrueStatus.Status = "Ready"
+			} else {
+				allReady = false
+			}
+		} else {
+			allReady = false
+		}
+		components.GoTrue = gotrueStatus
+	}
+
 	// Determine phase
 	if allReady {
 		project.Status.Phase = etalbaasv1alpha1.ProjectPhaseReady
@@ -566,6 +922,7 @@ func (r *ProjectReconciler) updateStatus(ctx context.Context, project *etalbaasv
 			StorageApi:         "https://" + subdomain + ".api." + r.Config.BaseDomain + "/storage",
 			DbHost:             dbSubdomain + ".db." + r.Config.BaseDomain,
 			DbConnectionString: "postgresql://app@" + dbSubdomain + ".db." + r.Config.BaseDomain + ":5432/postgres?sslmode=require&sslnegotiation=direct",
+			AuthApi:            "https://" + subdomain + ".api." + r.Config.BaseDomain + "/auth",
 		}
 	}
 
@@ -597,7 +954,11 @@ func (r *ProjectReconciler) updateStatus(ctx context.Context, project *etalbaasv
 }
 
 // setFailed sets the project phase to Failed and returns an appropriate result.
+// Conflict errors are transient and should be retried, not marked as Failed.
 func (r *ProjectReconciler) setFailed(ctx context.Context, project *etalbaasv1alpha1.Project, reason string, err error) (ctrl.Result, error) {
+	if apierrors.IsConflict(err) {
+		return ctrl.Result{Requeue: true}, nil
+	}
 	project.Status.Phase = etalbaasv1alpha1.ProjectPhaseFailed
 	condition := metav1.Condition{
 		Type:               "Provisioned",
@@ -637,6 +998,10 @@ func (r *ProjectReconciler) deleteUnstructuredIfExists(ctx context.Context, gvk 
 func (r *ProjectReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&etalbaasv1alpha1.Project{}).
+		Owns(&appsv1.Deployment{}).
+		Owns(&corev1.Service{}).
+		Owns(&corev1.ConfigMap{}).
+		Owns(&networkingv1.NetworkPolicy{}).
 		Named("project").
 		Complete(r)
 }

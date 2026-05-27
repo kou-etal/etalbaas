@@ -30,7 +30,9 @@ func testScheme() *runtime.Scheme {
 }
 
 func testConfig() config.OperatorConfig {
-	return config.DefaultConfig()
+	cfg := config.DefaultConfig()
+	cfg.JWTSecret = "test-jwt-secret-for-unit-tests"
+	return cfg
 }
 
 func newTestProject(name string, opts ...func(*etalbaasv1alpha1.Project)) *etalbaasv1alpha1.Project {
@@ -189,6 +191,7 @@ func TestProjectReconcile_CreatesNetworkPolicies(t *testing.T) {
 		"default-deny-ingress",
 		"allow-intra-namespace",
 		"allow-platform",
+		"allow-envoy-gateway",
 		"egress-restrict",
 	}
 
