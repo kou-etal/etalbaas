@@ -1,0 +1,37 @@
+{{- if .Values.gpu.enabled }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: gpu-dispatcher
+  namespace: {{ include "etalbaas.namespace" . }}
+  labels:
+    {{- include "etalbaas.serviceLabels" (dict "root" . "component" "gpu-dispatcher") | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: gpu-dispatcher
+  namespace: {{ include "etalbaas.namespace" . }}
+  labels:
+    {{- include "etalbaas.serviceLabels" (dict "root" . "component" "gpu-dispatcher") | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["create", "get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: gpu-dispatcher
+  namespace: {{ include "etalbaas.namespace" . }}
+  labels:
+    {{- include "etalbaas.serviceLabels" (dict "root" . "component" "gpu-dispatcher") | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: gpu-dispatcher
+subjects:
+  - kind: ServiceAccount
+    name: gpu-dispatcher
+    namespace: {{ include "etalbaas.namespace" . }}
+{{- end }}
