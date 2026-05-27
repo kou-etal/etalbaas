@@ -1,81 +1,86 @@
-# Production environment overrides for EtalBaaS Helm chart
+# Production environment overrides for EtalBaaS Helm chart.
+# This file is referenced by deploy/argocd/apps/etalbaas.yaml.
+# Values here merge with (and override) deploy/helm/etalbaas/values.yaml.
+
 global:
-  baseDomain: "etalbaas.example.com"  # TODO: Replace with actual domain
+  baseDomain: "etalbaas.example.com"        # TODO: Replace with actual domain
   environment: "production"
-  imageRegistry: "registry.etalbaas.example.com"  # TODO: Replace with actual registry
+  imageRegistry: "ghcr.io/kou-etal"
 
-gateway:
-  replicas: 3
-  resources:
-    requests:
-      cpu: 200m
-      memory: 256Mi
-    limits:
-      cpu: "1"
-      memory: 512Mi
+services:
+  common:
+    replicaCount: 2
 
-tenantUser:
-  replicas: 2
-  resources:
-    requests:
-      cpu: 100m
-      memory: 128Mi
-    limits:
-      cpu: 500m
-      memory: 256Mi
+  tenantUser:
+    replicaCount: 2
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
 
-project:
-  replicas: 2
-  resources:
-    requests:
-      cpu: 100m
-      memory: 128Mi
-    limits:
-      cpu: 500m
-      memory: 256Mi
+  project:
+    replicaCount: 2
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
 
-function:
-  replicas: 2
-  resources:
-    requests:
-      cpu: 200m
-      memory: 256Mi
-    limits:
-      cpu: "1"
-      memory: 512Mi
+  function:
+    replicaCount: 2
+    resources:
+      requests:
+        cpu: 200m
+        memory: 256Mi
+      limits:
+        cpu: "1"
+        memory: 512Mi
 
-event:
-  replicas: 2
-  resources:
-    requests:
-      cpu: 100m
-      memory: 128Mi
-    limits:
-      cpu: 500m
-      memory: 256Mi
+  event:
+    replicaCount: 2
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
 
-storage:
-  replicas: 2
-  resources:
-    requests:
-      cpu: 100m
-      memory: 128Mi
-    limits:
-      cpu: 500m
-      memory: 256Mi
+  storage:
+    replicaCount: 2
+    s3:
+      endpoint: ""                            # TODO: Replace with R2/MinIO endpoint
+      bucket: "etalbaas-storage"
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
 
 certManager:
   issuer:
-    email: "admin@etalbaas.example.com"  # TODO: Replace with actual email
-    server: "https://acme-v02.api.letsencrypt.org/directory"
+    email: "admin@etalbaas.example.com"       # TODO: Replace with actual email
 
 metadb:
   internal:
     instances: 3
-    storage:
-      size: 20Gi
+    storage: 20Gi
     backup:
       enabled: true
+      endpoint: ""                            # TODO: Replace with R2/S3 endpoint
+      region: "auto"
+      bucket: "etalbaas-backups"
+      credentialsSecret: "r2-backup-creds"
       schedule: "0 2 * * *"
-      retentionPolicy: "30d"
-      destinationPath: "s3://etalbaas-backups/metadb/"
+      retentionDays: 30
+
+gotrue:
+  externalUrl: "https://auth.etalbaas.example.com"    # TODO: Replace
+  siteUrl: "https://dashboard.etalbaas.example.com"   # TODO: Replace
