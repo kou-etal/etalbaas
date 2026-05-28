@@ -24,6 +24,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
+	jwtlib "github.com/golang-jwt/jwt/v5"
+
 	etalbaasv1alpha1 "github.com/kou-etal/etalbaas/operator/api/v1alpha1"
 	"github.com/kou-etal/etalbaas/operator/internal/config"
 	"github.com/kou-etal/etalbaas/operator/internal/natsadmin"
@@ -612,13 +614,20 @@ func (r *ProjectReconciler) ensureRoleKeySecret(ctx context.Context, project *et
 	existing := &corev1.Secret{}
 	err := r.Get(ctx, types.NamespacedName{Name: secretName, Namespace: namespace}, existing)
 	if err == nil {
-		return nil
-	}
-	if !apierrors.IsNotFound(err) {
+		// Check if the existing JWT is expiring soon (within 30 days).
+		if !r.isJWTExpiringSoon(existing.Data["key"], 30*24*time.Hour) {
+			return nil
+		}
+		// Delete the expiring secret so we regenerate it below.
+		log.FromContext(ctx).Info("regenerating expiring JWT", "secret", secretName, "namespace", namespace)
+		if err := r.Delete(ctx, existing); err != nil {
+			return fmt.Errorf("delete expiring %s: %w", secretName, err)
+		}
+	} else if !apierrors.IsNotFound(err) {
 		return fmt.Errorf("check %s: %w", secretName, err)
 	}
 
-	jwt, err := resources.SignRS256JWT(claims, rsaKey, "key1")
+	jwtStr, err := resources.SignRS256JWT(claims, rsaKey, "key1")
 	if err != nil {
 		return fmt.Errorf("sign JWT for %s: %w", secretName, err)
 	}
@@ -632,10 +641,27 @@ func (r *ProjectReconciler) ensureRoleKeySecret(ctx context.Context, project *et
 		},
 		Type: corev1.SecretTypeOpaque,
 		StringData: map[string]string{
-			"key": jwt,
+			"key": jwtStr,
 		},
 	}
 	return r.Create(ctx, secret)
+}
+
+// isJWTExpiringSoon parses a JWT without verification and checks if exp is within the threshold.
+func (r *ProjectReconciler) isJWTExpiringSoon(tokenData []byte, threshold time.Duration) bool {
+	if len(tokenData) == 0 {
+		return true
+	}
+	parser := jwtlib.NewParser(jwtlib.WithoutClaimsValidation())
+	claims := &jwtlib.RegisteredClaims{}
+	_, _, err := parser.ParseUnverified(string(tokenData), claims)
+	if err != nil {
+		return true // can't parse → treat as expired
+	}
+	if claims.ExpiresAt == nil {
+		return false // no expiry → never expires
+	}
+	return time.Until(claims.ExpiresAt.Time) < threshold
 }
 
 func (r *ProjectReconciler) reconcileGoTrue(ctx context.Context, project *etalbaasv1alpha1.Project) error {
