@@ -1,0 +1,27 @@
+---
+- name: Check if Tailscale is installed
+  command: tailscale version
+  register: ts_installed
+  ignore_errors: true
+  changed_when: false
+
+- name: Install Tailscale
+  shell: curl -fsSL https://tailscale.com/install.sh | sh
+  args:
+    creates: /usr/bin/tailscale
+  when: ts_installed.rc != 0
+
+- name: Check Tailscale connection status
+  command: tailscale status --json
+  register: ts_status
+  changed_when: false
+  ignore_errors: true
+
+- name: Authenticate Tailscale
+  command: >
+    tailscale up
+    --authkey={{ tailscale_auth_key }}
+    --advertise-tags={{ tailscale_advertise_tags }}
+  when: >
+    ts_status.rc != 0 or
+    (ts_status.stdout | from_json).BackendState != 'Running'
