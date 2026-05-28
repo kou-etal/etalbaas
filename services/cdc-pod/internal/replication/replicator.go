@@ -37,7 +37,11 @@ func NewReplicator(cfg *config.Config, hnd *Handler, pub *publisher.NATSPublishe
 // It blocks until the context is cancelled or a fatal error occurs.
 func (r *Replicator) Run(ctx context.Context) error {
 	// 1. Standard connection for DDL (publication management).
-	stdConn, err := pgx.Connect(ctx, r.cfg.StandardConnString())
+	stdCfg, err := r.cfg.StandardConnConfig()
+	if err != nil {
+		return fmt.Errorf("build standard db config: %w", err)
+	}
+	stdConn, err := pgx.ConnectConfig(ctx, stdCfg)
 	if err != nil {
 		return fmt.Errorf("standard db connect: %w", err)
 	}
@@ -50,7 +54,11 @@ func (r *Replicator) Run(ctx context.Context) error {
 	stdConn.Close(ctx) // No longer needed.
 
 	// 2. Replication connection.
-	replConn, err := pgconn.Connect(ctx, r.cfg.ReplicationConnString())
+	replCfg, err := r.cfg.ReplicationConnConfig()
+	if err != nil {
+		return fmt.Errorf("build replication config: %w", err)
+	}
+	replConn, err := pgconn.ConnectConfig(ctx, replCfg)
 	if err != nil {
 		return fmt.Errorf("replication connect: %w", err)
 	}

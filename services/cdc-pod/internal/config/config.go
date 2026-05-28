@@ -2,9 +2,10 @@ package config
 
 import (
 	"fmt"
-	"net/url"
 
 	"github.com/caarlos0/env/v11"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // Config holds all CDC Pod configuration, loaded from environment variables.
@@ -42,25 +43,33 @@ func (c *Config) EffectivePublicationName() string {
 	return "cdc_" + c.ProjectID
 }
 
-// StandardConnString returns a PostgreSQL connection string for regular queries.
-func (c *Config) StandardConnString() string {
-	u := &url.URL{
-		Scheme: "postgres",
-		User:   url.UserPassword(c.DBUser, c.DBPassword),
-		Host:   fmt.Sprintf("%s:%d", c.DBHost, c.DBPort),
-		Path:   c.DBName,
+// StandardConnConfig returns a pgx connection config for regular queries.
+// Uses programmatic config to prevent passwords from leaking into error messages.
+func (c *Config) StandardConnConfig() (*pgx.ConnConfig, error) {
+	cfg, err := pgx.ParseConfig("")
+	if err != nil {
+		return nil, fmt.Errorf("parse empty pgx config: %w", err)
 	}
-	return u.String()
+	cfg.Host = c.DBHost
+	cfg.Port = uint16(c.DBPort)
+	cfg.User = c.DBUser
+	cfg.Password = c.DBPassword
+	cfg.Database = c.DBName
+	return cfg, nil
 }
 
-// ReplicationConnString returns a PostgreSQL connection string for replication protocol.
-func (c *Config) ReplicationConnString() string {
-	u := &url.URL{
-		Scheme:   "postgres",
-		User:     url.UserPassword(c.DBUser, c.DBPassword),
-		Host:     fmt.Sprintf("%s:%d", c.DBHost, c.DBPort),
-		Path:     c.DBName,
-		RawQuery: "replication=database",
+// ReplicationConnConfig returns a pgconn connection config for replication protocol.
+// Uses programmatic config to prevent passwords from leaking into error messages.
+func (c *Config) ReplicationConnConfig() (*pgconn.Config, error) {
+	cfg, err := pgconn.ParseConfig("")
+	if err != nil {
+		return nil, fmt.Errorf("parse empty pgconn config: %w", err)
 	}
-	return u.String()
+	cfg.Host = c.DBHost
+	cfg.Port = uint16(c.DBPort)
+	cfg.User = c.DBUser
+	cfg.Password = c.DBPassword
+	cfg.Database = c.DBName
+	cfg.RuntimeParams["replication"] = "database"
+	return cfg, nil
 }
