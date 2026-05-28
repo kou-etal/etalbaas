@@ -13,6 +13,8 @@ spec:
     targetRevision: v4.16.1
     helm:
       values: |
+        driver:
+          kind: modern_ebpf
         falcosidekick:
           enabled: true
   destination:
