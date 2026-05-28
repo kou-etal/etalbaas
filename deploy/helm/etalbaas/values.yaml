@@ -239,11 +239,14 @@ gotrue:
       memory: 128Mi
 
 # ─── Auth / JWT ──────────────────────────────────────────────────────────────
+# SecurityPolicy uses remoteJWKS to verify RS256 JWTs issued by GoTrue.
+# jwksUri is HTTP (in-cluster). Production should use internal HTTPS if mTLS is available.
 auth:
   jwt:
     jwksUri: "http://gotrue-dev.platform-system.svc:9999/.well-known/jwks.json"
-    issuer: ""
-    audiences: []
+    issuer: ""  # Set to GoTrue API_EXTERNAL_URL in production (e.g., "https://auth.example.com")
+    audiences:
+      - "authenticated"
 
 # ─── Observability ───────────────────────────────────────────────────────────
 observability:

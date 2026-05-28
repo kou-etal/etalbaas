@@ -1,8 +1,11 @@
 {{- if and .Values.gateway.enabled .Values.auth.jwt.jwksUri }}
+# SecurityPolicy applies JWT authentication to ALL platform API routes.
+# Per-project routes (PostgREST, GoTrue) have their own JWT verification
+# and do not require this policy.
 apiVersion: gateway.envoyproxy.io/v1alpha1
 kind: SecurityPolicy
 metadata:
-  name: dashboard-jwt-auth
+  name: platform-api-jwt-auth
   namespace: {{ include "etalbaas.namespace" . }}
   labels:
     {{- include "etalbaas.labels" . | nindent 4 }}

@@ -81,6 +81,14 @@ metadb:
       schedule: "0 2 * * *"
       retentionDays: 30
 
+auth:
+  jwt:
+    # Production: use the actual GoTrue service name (not gotrue-dev)
+    jwksUri: "http://gotrue.platform-system.svc:9999/.well-known/jwks.json"  # TODO: Replace namespace if different
+    issuer: "https://auth.etalbaas.example.com"  # TODO: Must match GoTrue API_EXTERNAL_URL
+    audiences:
+      - "authenticated"
+
 gotrue:
   externalUrl: "https://auth.etalbaas.example.com"    # TODO: Replace
   siteUrl: "https://dashboard.etalbaas.example.com"   # TODO: Replace
