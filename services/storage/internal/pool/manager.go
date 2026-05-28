@@ -172,12 +172,18 @@ func (m *Manager) createPool(ctx context.Context, projectID string) (*pgxpool.Po
 	if svcErr != nil {
 		host = fmt.Sprintf("db-rw.%s.svc", namespace)
 	}
-	dsn := fmt.Sprintf("postgres://%s:%s@%s:5432/postgres", username, password, host)
 
-	cfg, err := pgxpool.ParseConfig(dsn)
+	// Build config programmatically instead of DSN string to prevent
+	// passwords from leaking into error messages and logs.
+	cfg, err := pgxpool.ParseConfig("")
 	if err != nil {
 		return nil, fmt.Errorf("parse tenant db config: %w", err)
 	}
+	cfg.ConnConfig.Host = host
+	cfg.ConnConfig.Port = 5432
+	cfg.ConnConfig.User = username
+	cfg.ConnConfig.Password = password
+	cfg.ConnConfig.Database = "postgres"
 	cfg.MaxConns = defaultMaxConns
 	cfg.MinConns = defaultMinConns
 	cfg.MaxConnLifetime = defaultMaxConnLifetime
