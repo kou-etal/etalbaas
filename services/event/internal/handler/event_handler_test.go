@@ -44,6 +44,10 @@ func (m *mockQuerier) ListEventHistoryByFunctionID(ctx context.Context, arg stor
 	return nil, nil
 }
 
+func (m *mockQuerier) ListEventHistoryByProjectID(ctx context.Context, arg store.ListEventHistoryByProjectIDParams) ([]store.EventHistory, error) {
+	return nil, nil
+}
+
 func (m *mockQuerier) GetEventByID(ctx context.Context, arg store.GetEventByIDParams) (store.EventHistory, error) {
 	if m.getEventByIDFn != nil {
 		return m.getEventByIDFn(ctx, arg)

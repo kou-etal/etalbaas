@@ -36,6 +36,10 @@ func (m *mockQuerier) ListEventHistoryByFunctionID(ctx context.Context, arg stor
 	return nil, nil
 }
 
+func (m *mockQuerier) ListEventHistoryByProjectID(ctx context.Context, arg store.ListEventHistoryByProjectIDParams) ([]store.EventHistory, error) {
+	return nil, nil
+}
+
 func (m *mockQuerier) GetEventByID(ctx context.Context, arg store.GetEventByIDParams) (store.EventHistory, error) {
 	if m.getEventByIDFn != nil {
 		return m.getEventByIDFn(ctx, arg)
@@ -70,10 +74,11 @@ func newTestEventHistory() store.EventHistory {
 func TestListEventHistory_ProjectNotFound(t *testing.T) {
 	svc := NewEventService(&mockQuerier{})
 
+	fnID := uuid.New()
 	_, err := svc.ListEventHistory(context.Background(), ListEventHistoryParams{
 		TenantID:   uuid.New(),
 		ProjectID:  "proj-123",
-		FunctionID: uuid.New(),
+		FunctionID: &fnID,
 		Limit:      21,
 	})
 	if err == nil {
@@ -94,10 +99,11 @@ func TestListEventHistory_Success(t *testing.T) {
 		},
 	})
 
+	fnID := uuid.MustParse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
 	rows, err := svc.ListEventHistory(context.Background(), ListEventHistoryParams{
 		TenantID:   uuid.New(),
 		ProjectID:  "proj-123",
-		FunctionID: uuid.MustParse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
+		FunctionID: &fnID,
 		Limit:      21,
 	})
 	if err != nil {
@@ -134,10 +140,11 @@ func TestListEventHistory_LimitClamping(t *testing.T) {
 				},
 			})
 
+			fnID := uuid.New()
 			_, err := svc.ListEventHistory(context.Background(), ListEventHistoryParams{
 				TenantID:   uuid.New(),
 				ProjectID:  "proj-123",
-				FunctionID: uuid.New(),
+				FunctionID: &fnID,
 				Limit:      tt.input,
 			})
 			if err != nil {
@@ -158,10 +165,11 @@ func TestListEventHistory_EmptyResult(t *testing.T) {
 		},
 	})
 
+	fnID := uuid.New()
 	rows, err := svc.ListEventHistory(context.Background(), ListEventHistoryParams{
 		TenantID:   uuid.New(),
 		ProjectID:  "proj-123",
-		FunctionID: uuid.New(),
+		FunctionID: &fnID,
 		Limit:      21,
 	})
 	if err != nil {
