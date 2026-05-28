@@ -47,7 +47,7 @@ func newEchoClient(serverURL string) *connect.Client[wrapperspb.StringValue, wra
 func TestGatewayInterceptor_ValidToken(t *testing.T) {
 	tokenStr := createTestToken(t, testUserUUID.String(), time.Now().Add(time.Hour))
 
-	interceptor := auth.NewGatewayInterceptor(testSigningKey)
+	interceptor := auth.NewGatewayInterceptor(&testRSAKey.PublicKey)
 	handler, cap := newEchoHandler(interceptor)
 
 	server := httptest.NewServer(handler)
@@ -67,7 +67,7 @@ func TestGatewayInterceptor_ValidToken(t *testing.T) {
 }
 
 func TestGatewayInterceptor_MissingAuth(t *testing.T) {
-	interceptor := auth.NewGatewayInterceptor(testSigningKey)
+	interceptor := auth.NewGatewayInterceptor(&testRSAKey.PublicKey)
 	handler, _ := newEchoHandler(interceptor)
 
 	server := httptest.NewServer(handler)
@@ -86,7 +86,7 @@ func TestGatewayInterceptor_MissingAuth(t *testing.T) {
 }
 
 func TestGatewayInterceptor_InvalidToken(t *testing.T) {
-	interceptor := auth.NewGatewayInterceptor(testSigningKey)
+	interceptor := auth.NewGatewayInterceptor(&testRSAKey.PublicKey)
 	handler, _ := newEchoHandler(interceptor)
 
 	server := httptest.NewServer(handler)

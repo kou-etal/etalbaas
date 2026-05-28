@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"crypto/rsa"
 	"errors"
 	"strings"
 
@@ -11,7 +12,9 @@ import (
 	"github.com/kou-etal/etalbaas/pkg/requestctx"
 )
 
-func NewGatewayInterceptor(signingKey []byte) connect.UnaryInterceptorFunc {
+// NewGatewayInterceptor creates a connect-rpc interceptor that verifies RS256 JWTs.
+// Only RS256 is accepted to prevent Key Confusion Attack (CVE-2016-5431).
+func NewGatewayInterceptor(pubKey *rsa.PublicKey) connect.UnaryInterceptorFunc {
 	return func(next connect.UnaryFunc) connect.UnaryFunc {
 		return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
 			if isPublicProcedure(req.Spec().Procedure) {
@@ -28,7 +31,7 @@ func NewGatewayInterceptor(signingKey []byte) connect.UnaryInterceptorFunc {
 				return nil, connect.NewError(connect.CodeUnauthenticated, nil)
 			}
 
-			claims, err := VerifyToken(tokenStr, signingKey)
+			claims, err := VerifyToken(tokenStr, pubKey)
 			if err != nil {
 				return nil, connect.NewError(connect.CodeUnauthenticated, err)
 			}

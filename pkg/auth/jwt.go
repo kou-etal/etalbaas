@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"crypto/rsa"
 	"fmt"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -11,12 +12,14 @@ type Claims struct {
 	jwt.RegisteredClaims
 }
 
-func VerifyToken(tokenStr string, signingKey []byte) (*Claims, error) {
+// VerifyToken verifies an RS256-signed JWT using the provided RSA public key.
+// HS256 tokens are explicitly rejected to prevent Key Confusion Attack (CVE-2016-5431).
+func VerifyToken(tokenStr string, pubKey *rsa.PublicKey) (*Claims, error) {
 	token, err := jwt.ParseWithClaims(tokenStr, &Claims{}, func(t *jwt.Token) (interface{}, error) {
-		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
+		if _, ok := t.Method.(*jwt.SigningMethodRSA); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v (only RS256 allowed)", t.Header["alg"])
 		}
-		return signingKey, nil
+		return pubKey, nil
 	})
 	if err != nil {
 		return nil, fmt.Errorf("parse token: %w", err)
