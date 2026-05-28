@@ -148,6 +148,12 @@ func (s *SecretService) UpdateSecretValue(ctx context.Context, tenantID uuid.UUI
 		return store.SecretsMetadatum{}, apperror.Wrap(apperror.CodeInternal, "update k8s secret", err)
 	}
 
+	// Trigger rolling restart of Deployments so pods pick up the new secret value.
+	if err := s.secMgr.RestartDeployments(ctx, namespace); err != nil {
+		slog.Error("failed to restart deployments after secret update", "error", err, "namespace", namespace)
+		// Non-fatal: secret is updated, but pods need manual restart.
+	}
+
 	row, err := s.q.UpdateSecretMetadataUpdatedAt(ctx, store.UpdateSecretMetadataUpdatedAtParams{
 		ID:        secretID,
 		ProjectID: projectID,

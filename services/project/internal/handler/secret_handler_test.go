@@ -48,6 +48,8 @@ func (m *mockSecretManager) DeleteSecret(ctx context.Context, namespace, name st
 	return nil
 }
 
+func (m *mockSecretManager) RestartDeployments(_ context.Context, _ string) error { return nil }
+
 var _ k8s.SecretManager = (*mockSecretManager)(nil)
 
 func newTestSecretMetadata() store.SecretsMetadatum {

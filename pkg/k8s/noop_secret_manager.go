@@ -9,3 +9,4 @@ type NoopSecretManager struct{}
 func (NoopSecretManager) CreateSecret(_ context.Context, _, _, _, _ string) error { return nil }
 func (NoopSecretManager) UpdateSecret(_ context.Context, _, _, _, _ string) error { return nil }
 func (NoopSecretManager) DeleteSecret(_ context.Context, _, _ string) error       { return nil }
+func (NoopSecretManager) RestartDeployments(_ context.Context, _ string) error    { return nil }

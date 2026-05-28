@@ -2,6 +2,7 @@ package k8s
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -10,6 +11,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 )
 
@@ -20,6 +22,10 @@ type SecretManager interface {
 	CreateSecret(ctx context.Context, namespace, name, key, value string) error
 	UpdateSecret(ctx context.Context, namespace, name, key, value string) error
 	DeleteSecret(ctx context.Context, namespace, name string) error
+	// RestartDeployments triggers a rolling restart of all Deployments in the namespace
+	// by patching the pod template annotation. Used after Secret updates so that
+	// pods pick up the new secret values.
+	RestartDeployments(ctx context.Context, namespace string) error
 }
 
 type secretManager struct {
@@ -81,6 +87,43 @@ func (m *secretManager) DeleteSecret(ctx context.Context, namespace, name string
 	}
 	if err != nil {
 		return fmt.Errorf("delete k8s secret %s/%s: %w", namespace, name, err)
+	}
+	return nil
+}
+
+func (m *secretManager) RestartDeployments(ctx context.Context, namespace string) error {
+	ctx, cancel := context.WithTimeout(ctx, k8sTimeout)
+	defer cancel()
+
+	// Only restart Function Deployments — avoid disrupting GoTrue, PostgREST, etc.
+	deploys, err := m.client.AppsV1().Deployments(namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: "etalbaas.io/type=function",
+	})
+	if err != nil {
+		return fmt.Errorf("list deployments in %s: %w", namespace, err)
+	}
+
+	ts := time.Now().Format(time.RFC3339)
+	for _, d := range deploys.Items {
+		patch := map[string]interface{}{
+			"spec": map[string]interface{}{
+				"template": map[string]interface{}{
+					"metadata": map[string]interface{}{
+						"annotations": map[string]string{
+							"etalbaas.io/secret-updated-at": ts,
+						},
+					},
+				},
+			},
+		}
+		patchBytes, err := json.Marshal(patch)
+		if err != nil {
+			return fmt.Errorf("marshal patch: %w", err)
+		}
+		_, err = m.client.AppsV1().Deployments(namespace).Patch(ctx, d.Name, k8stypes.StrategicMergePatchType, patchBytes, metav1.PatchOptions{})
+		if err != nil {
+			return fmt.Errorf("patch deployment %s/%s: %w", namespace, d.Name, err)
+		}
 	}
 	return nil
 }
