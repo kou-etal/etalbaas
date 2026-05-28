@@ -19,6 +19,7 @@ spec:
         app.kubernetes.io/component: gotrue-dev
         {{- include "etalbaas.selectorLabels" . | nindent 8 }}
     spec:
+      {{- include "etalbaas.imagePullSecrets" . | nindent 6 }}
       containers:
         - name: gotrue
           image: {{ .Values.gotrue.image.repository }}:{{ .Values.gotrue.image.tag }}

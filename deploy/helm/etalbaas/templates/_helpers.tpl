@@ -106,6 +106,17 @@ Provides PORT, METRICS_PORT, ENV, OTEL endpoint, DATABASE_URL.
 {{- end }}
 
 {{/*
+imagePullSecrets for private container registries (e.g. GHCR).
+Renders nothing if global.imagePullSecrets is empty.
+*/}}
+{{- define "etalbaas.imagePullSecrets" -}}
+{{- with .Values.global.imagePullSecrets }}
+imagePullSecrets:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+{{- end }}
+
+{{/*
 Pod-level security context (applied to spec.securityContext).
 */}}
 {{- define "etalbaas.podSecurityContext" -}}

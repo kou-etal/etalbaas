@@ -5,6 +5,8 @@ global:
   environment: "production"
   imageRegistry: "ghcr.io/kou-etal"
   imagePullPolicy: IfNotPresent
+  imagePullSecrets: []
+  # - name: ghcr-pull-secret
 
 # ─── Platform Services ────────────────────────────────────────────────────────
 services:

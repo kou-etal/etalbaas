@@ -21,6 +21,7 @@ spec:
     spec:
       serviceAccountName: project-sa
       automountServiceAccountToken: true
+      {{- include "etalbaas.imagePullSecrets" . | nindent 6 }}
       securityContext:
         {{- include "etalbaas.podSecurityContext" . | nindent 8 }}
       containers:
