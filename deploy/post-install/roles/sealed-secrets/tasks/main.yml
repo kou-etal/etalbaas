@@ -60,7 +60,7 @@
     namespace: "{{ sealed_secrets_namespace }}"
   register: ss_deploy
   until: >-
-    ss_deploy.resources | length > 0 and
-    ss_deploy.resources[0].status.readyReplicas | default(0) >= 1
+    (ss_deploy.resources | default([])) | length > 0 and
+    (ss_deploy.resources | default([]))[0].status.readyReplicas | default(0) >= 1
   retries: 30
   delay: 5

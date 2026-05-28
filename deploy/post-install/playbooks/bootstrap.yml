@@ -2,10 +2,10 @@
 # EtalBaaS Post-Install Bootstrap
 #
 # Run after kubespray cluster.yml completes.
-# Installs: Sealed Secrets → ArgoCD → Root Application → Cloudflare DNS
+# Installs: Sealed Secrets → ArgoCD → Root Application → Cloudflare DNS → Tailscale
 #
 # Usage:
-#   ansible-playbook playbooks/bootstrap.yml
+#   ansible-playbook playbooks/bootstrap.yml -i <inventory>
 #
 # Prerequisites:
 #   - kubeconfig accessible (~/.kube/config or KUBECONFIG env)
@@ -17,8 +17,11 @@
   connection: local
   gather_facts: false
 
+  vars_files:
+    - ../group_vars/all/vault.yml
+    - ../group_vars/all/main.yml
+
   vars:
-    base_domain: "{{ lookup('env', 'ETALBAAS_DOMAIN') | default('yourdomain.com', true) }}"
     platform_namespace: "platform-system"
 
   roles:
@@ -33,3 +36,13 @@
 
     - role: cloudflare-dns
       tags: [cloudflare-dns]
+
+# --- Tailscale on VPS nodes (requires -i <kubespray inventory>) ---
+- name: Install Tailscale on cluster nodes
+  hosts: kube_control_plane
+  become: true
+  gather_facts: false
+  tags: [tailscale]
+  roles:
+    - role: tailscale
+      when: tailscale_auth_key is defined and tailscale_auth_key | length > 0

@@ -21,3 +21,9 @@ argocd_admin_password_hash: ""
 # ─── Cloudflare (DNS + cert-manager) ────────────────────────────────────────
 cloudflare_api_token: ""
 cloudflare_zone_id: ""
+
+# ─── Tailscale (operator VPN) ─────────────────────────────────────────────
+# Generate: admin.tailscale.com → Settings → Keys → Generate auth key
+#   - Reusable: yes
+#   - Tags: tag:etalbaas-node (create tag in ACL first)
+tailscale_auth_key: ""
