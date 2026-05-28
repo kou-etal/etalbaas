@@ -145,6 +145,14 @@ stage_cluster() {
     log "kubespray already cloned, skipping"
   fi
 
+  log "Setting up Python venv for kubespray..."
+  local venv_dir="$HOME/.kubespray-venv"
+  if [[ ! -d "$venv_dir" ]]; then
+    python3 -m venv "$venv_dir"
+  fi
+  # shellcheck disable=SC1091
+  source "$venv_dir/bin/activate"
+
   log "Installing kubespray Python requirements..."
   pip install -q -r "$KUBESPRAY_DIR/kubespray/requirements.txt"
 
@@ -157,7 +165,8 @@ stage_cluster() {
 
   log "Running kubespray cluster.yml..."
   cd "$KUBESPRAY_DIR/kubespray"
-  ansible-playbook -i "$INVENTORY" cluster.yml --become --become-user=root
+  ANSIBLE_CONFIG="$KUBESPRAY_DIR/kubespray/ansible.cfg" \
+    ansible-playbook -i "$INVENTORY" cluster.yml --become --become-user=root
 
   log "Fetching kubeconfig from $NODE1_IP..."
   mkdir -p "$HOME/.kube"
@@ -185,7 +194,9 @@ stage_bootstrap() {
   ansible-galaxy collection install -r requirements.yml --force
 
   log "Running bootstrap playbook..."
-  ansible-playbook playbooks/bootstrap.yml --vault-password-file="$VAULT_PW_FILE"
+  ansible-playbook playbooks/bootstrap.yml \
+    --vault-password-file="$VAULT_PW_FILE" \
+    -i "$INVENTORY"
 
   log "Bootstrap complete."
 }

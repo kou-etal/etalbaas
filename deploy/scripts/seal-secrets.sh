@@ -70,6 +70,21 @@ if [[ -n "$DISCORD_URL" ]]; then
     > "$OUTPUT_DIR/discord-webhook.yaml"
 fi
 
+# --- ghcr-pull-secret (container registry auth) ---
+GHCR_USER=$(grep '^GHCR_USERNAME=' "$ENV_FILE" | cut -d= -f2- || true)
+GHCR_TOKEN=$(grep '^GHCR_TOKEN=' "$ENV_FILE" | cut -d= -f2- || true)
+if [[ -n "$GHCR_USER" && -n "$GHCR_TOKEN" ]]; then
+  echo "Sealing ghcr-pull-secret..."
+  kubectl create secret docker-registry ghcr-pull-secret \
+    --namespace "$NAMESPACE" \
+    --docker-server=ghcr.io \
+    --docker-username="$GHCR_USER" \
+    --docker-password="$GHCR_TOKEN" \
+    --dry-run=client -o yaml \
+    | kubeseal --format yaml \
+    > "$OUTPUT_DIR/ghcr-pull-secret.yaml"
+fi
+
 echo ""
 echo "Done. Sealed secrets written to: deploy/sealed-secrets/"
 echo "Next: git add deploy/sealed-secrets/ && git push"
