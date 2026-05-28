@@ -1,25 +1,24 @@
 ---
 # EtalBaaS - Kubernetes cluster configuration
 
-# Kubernetes version (pinned for reproducibility)
-kube_version: v1.30.4
+# Kubernetes version (kubespray v2.25.0 supports up to v1.29.x)
+kube_version: v1.29.5
 
 # Container runtime
 container_manager: containerd
 
 # CNI: Cilium with WireGuard transparent encryption
 kube_network_plugin: cilium
-cilium_version: "1.16.4"
+cilium_version: "v1.15.4"
 cilium_encryption_enabled: true
 cilium_encryption_type: wireguard
 cilium_hubble_enabled: true
 cilium_hubble_relay_enabled: true
 
 # kube-vip: Control Plane VIP + Service LoadBalancer (ARP mode)
-# Requires L2 network (same subnet). See README for provider compatibility.
 kube_vip_enabled: true
 kube_vip_controlplane_enabled: true
-kube_vip_address: "203.0.113.100"  # UPDATE: Virtual IP for the cluster
+kube_vip_address: "162.43.46.85"
 kube_vip_services_enabled: true
 kube_vip_arp_enabled: true
 
@@ -39,14 +38,9 @@ audit_log_maxsize: 100
 # Pod Security Standards (baseline enforcement)
 kube_pod_security_use_default: true
 
-# Node-03 taint (etcd voter only, no workloads)
-node_taints:
-  node-03:
-    - "node-role.kubernetes.io/control-plane-only=:NoSchedule"
-
 # Additional API server SANs (for external kubectl access)
 supplementary_addresses_in_ssl_keys:
-  - "203.0.113.100"  # kube-vip VIP
+  - "162.43.46.85"
 
 # kubelet resource reservation (prevent system OOM)
 kubelet_system_reserved: true
@@ -60,6 +54,6 @@ kubelet_eviction_hard:
   nodefs.available: "10%"
   imagefs.available: "15%"
 
-# Firewall: nftables with additional ports for platform services
-# kubespray manages inter-node ports (etcd, kubelet, Cilium) automatically.
-nftables_enabled: true
+# kube-proxy
+kube_proxy_mode: ipvs
+kube_proxy_strict_arp: true
