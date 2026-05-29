@@ -142,6 +142,12 @@ spec:
                     - sakura
                     - self-managed
                     type: string
+                  providerConfig:
+                    additionalProperties:
+                      type: string
+                    description: ProviderConfig holds provider-specific configuration
+                      (e.g., RunPod endpoint_id).
+                    type: object
                   required:
                     description: Required indicates whether GPU is required.
                     type: boolean

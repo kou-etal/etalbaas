@@ -191,6 +191,7 @@ func DesiredEgressNetworkPolicy(project *etalbaasv1alpha1.Project, platformNames
 
 	dnsPort := intstr.FromInt32(53)
 	httpsPort := intstr.FromInt32(443)
+	apiServerPort := intstr.FromInt32(6443)
 	natsPort := intstr.FromInt32(4222)
 	storagePort := intstr.FromInt32(8080)
 	udp := corev1.ProtocolUDP
@@ -224,8 +225,10 @@ func DesiredEgressNetworkPolicy(project *etalbaasv1alpha1.Project, platformNames
 						{Protocol: &tcp, Port: &dnsPort},
 					},
 				},
-				// Allow HTTPS outbound, but block cloud metadata services.
+				// Allow HTTPS outbound + Kubernetes API server, block cloud metadata services.
 				// Prevents IAM token theft (Capital One 2019-style attack) in multi-tenant env.
+				// Port 6443: kube-proxy DNAT rewrites ClusterIP:443 → node:6443; Calico
+				// evaluates post-DNAT, so 6443 must be allowed for CNPG init jobs.
 				{
 					To: []networkingv1.NetworkPolicyPeer{
 						{
@@ -241,6 +244,7 @@ func DesiredEgressNetworkPolicy(project *etalbaasv1alpha1.Project, platformNames
 					},
 					Ports: []networkingv1.NetworkPolicyPort{
 						{Protocol: &tcp, Port: &httpsPort},
+						{Protocol: &tcp, Port: &apiServerPort},
 					},
 				},
 				// Allow intra-namespace communication

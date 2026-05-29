@@ -20,7 +20,7 @@ UPDATE storage.buckets
 SET access_level = COALESCE(sqlc.narg('access_level'), access_level),
     file_size_limit = COALESCE(sqlc.narg('file_size_limit'), file_size_limit),
     allowed_mime_types = COALESCE(sqlc.narg('allowed_mime_types'), allowed_mime_types),
-    updated_at = now()
+    updated_at = now()::timestamptz
 WHERE id = $1 AND project_id = $2
 RETURNING *;
 
@@ -40,7 +40,7 @@ INSERT INTO storage.objects (bucket_id, name, owner, size, mime_type, etag, meta
 VALUES ($1, $2, $3, $4, $5, $6, $7)
 ON CONFLICT (bucket_id, name) DO UPDATE
 SET size = EXCLUDED.size, mime_type = EXCLUDED.mime_type, etag = EXCLUDED.etag,
-    metadata = EXCLUDED.metadata, owner = EXCLUDED.owner, updated_at = now()
+    metadata = EXCLUDED.metadata, owner = EXCLUDED.owner, updated_at = now()::timestamptz
 RETURNING *;
 
 -- name: GetObjectByBucketAndName :one

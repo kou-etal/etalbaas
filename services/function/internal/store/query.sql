@@ -62,7 +62,7 @@ SET status = $3,
     build_image_digest = $5,
     build_duration_sec = $6,
     last_built_at = $7,
-    updated_at = now()
+    updated_at = now()::timestamptz
 WHERE id = $1 AND project_id = $2 AND status != 'deleted'
 RETURNING *;
 

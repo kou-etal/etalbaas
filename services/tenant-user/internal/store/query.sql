@@ -7,7 +7,7 @@ WHERE id = $1 AND status != 'deleted';
 UPDATE tenants
 SET display_name = COALESCE(sqlc.narg('display_name'), display_name),
     avatar_url = COALESCE(sqlc.narg('avatar_url'), avatar_url),
-    updated_at = now()
+    updated_at = now()::timestamptz
 WHERE id = $1 AND status != 'deleted'
 RETURNING id, email, display_name, avatar_url, plan, status, created_at, updated_at;
 

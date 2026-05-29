@@ -54,7 +54,7 @@ LIMIT sqlc.arg('page_size');
 
 -- name: RevokeApiKey :one
 UPDATE api_keys
-SET revoked_at = now()
+SET revoked_at = now()::timestamptz
 WHERE id = $1 AND project_id = $2 AND revoked_at IS NULL
 RETURNING *;
 
@@ -83,7 +83,7 @@ LIMIT sqlc.arg('page_size');
 
 -- name: UpdateSecretMetadataUpdatedAt :one
 UPDATE secrets_metadata
-SET updated_at = now()
+SET updated_at = now()::timestamptz
 WHERE id = $1 AND project_id = $2
 RETURNING *;
 
