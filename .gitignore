@@ -62,6 +62,7 @@ deploy/kubespray/inventory/production/hosts.yaml
 
 # Plain-text secrets for kubeseal (NEVER commit)
 deploy/scripts/secrets.env
+deploy/scripts/gotrue-jwk-set.json
 
 # Production values — kept in git for ArgoCD (contains only domain/config, no secrets).
 # deploy.sh regenerates this file with real values from main.yml.
