@@ -30,6 +30,16 @@ VAULT_PW_FILE="$POST_INSTALL_DIR/.vault-password"
 
 STAGE="${1:-all}"
 
+# WSL workaround: NTFS mounts everything as 0777 so Ansible treats the vault
+# password file as a script. Copy to a tmpfs path with correct permissions.
+if grep -qi microsoft /proc/version 2>/dev/null; then
+  _VAULT_PW_TMP="$(mktemp)"
+  cp "$VAULT_PW_FILE" "$_VAULT_PW_TMP"
+  chmod 600 "$_VAULT_PW_TMP"
+  VAULT_PW_FILE="$_VAULT_PW_TMP"
+  trap 'rm -f "$_VAULT_PW_TMP"' EXIT
+fi
+
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
 log()  { echo "==> $*"; }
@@ -270,7 +280,9 @@ stage_bootstrap() {
   ansible-galaxy collection install -r requirements.yml --force
 
   log "Running bootstrap playbook..."
-  ansible-playbook playbooks/bootstrap.yml \
+  ANSIBLE_ROLES_PATH="$POST_INSTALL_DIR/roles" \
+  ANSIBLE_HOST_KEY_CHECKING=false \
+    ansible-playbook playbooks/bootstrap.yml \
     --vault-password-file="$VAULT_PW_FILE" \
     -i "$INVENTORY"
 

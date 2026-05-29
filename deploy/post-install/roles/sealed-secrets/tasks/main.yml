@@ -36,20 +36,10 @@
   when: sealed_secrets_tls_key is defined and sealed_secrets_tls_crt is defined
 
 - name: Restart Sealed Secrets Controller to pick up new key
-  kubernetes.core.k8s:
-    state: present
-    apply: true
-    definition:
-      apiVersion: apps/v1
-      kind: Deployment
-      metadata:
-        name: "{{ sealed_secrets_controller_name }}"
-        namespace: "{{ sealed_secrets_namespace }}"
-      spec:
-        template:
-          metadata:
-            annotations:
-              kubectl.kubernetes.io/restartedAt: "{{ lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ') }}"
+  command: >
+    kubectl rollout restart deployment/{{ sealed_secrets_controller_name }}
+    -n {{ sealed_secrets_namespace }}
+  changed_when: true
   when: sealed_secrets_tls_key is defined and sealed_secrets_tls_crt is defined
 
 - name: Wait for Sealed Secrets Controller to be ready
