@@ -85,6 +85,20 @@ if [[ -n "$GHCR_USER" && -n "$GHCR_TOKEN" ]]; then
     > "$OUTPUT_DIR/ghcr-pull-secret.yaml"
 fi
 
+# --- r2-backup-creds (CNPG barman S3 backup) ---
+R2_AK=$(grep '^R2_BACKUP_ACCESS_KEY_ID=' "$ENV_FILE" | cut -d= -f2- || true)
+R2_SK=$(grep '^R2_BACKUP_SECRET_ACCESS_KEY=' "$ENV_FILE" | cut -d= -f2- || true)
+if [[ -n "$R2_AK" && -n "$R2_SK" ]]; then
+  echo "Sealing r2-backup-creds..."
+  kubectl create secret generic r2-backup-creds \
+    --namespace "$NAMESPACE" \
+    --from-literal=ACCESS_KEY_ID="$R2_AK" \
+    --from-literal=SECRET_ACCESS_KEY="$R2_SK" \
+    --dry-run=client -o yaml \
+    | kubeseal --format yaml \
+    > "$OUTPUT_DIR/r2-backup-creds.yaml"
+fi
+
 echo ""
 echo "Done. Sealed secrets written to: deploy/sealed-secrets/"
 echo "Next: git add deploy/sealed-secrets/ && git push"
