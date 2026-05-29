@@ -3,3 +3,8 @@
 # Override in group_vars if NodePorts change.
 envoy_nodeport_https: 30443
 envoy_nodeport_http: 30080
+
+# External network interface for DNAT rules.
+# Only traffic arriving on this interface is redirected to NodePorts.
+# Common values: ens3 (Xserver VPS), eth0 (most clouds), ens0
+dnat_external_interface: "ens3"

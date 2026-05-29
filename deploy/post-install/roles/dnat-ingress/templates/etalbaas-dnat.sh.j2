@@ -3,16 +3,18 @@
 # Managed by Ansible (dnat-ingress role). Do not edit manually.
 set -euo pipefail
 
+IFACE="{{ dnat_external_interface }}"
+
 add_rule() {
   local port="$1" target="$2"
-  # Add only if not already present (-i ens3 scopes to external traffic only)
-  if ! iptables -t nat -C PREROUTING -i ens3 -p tcp --dport "$port" -j DNAT --to-destination ":$target" 2>/dev/null; then
+  # Add only if not already present (-i $IFACE scopes to external traffic only)
+  if ! iptables -t nat -C PREROUTING -i "$IFACE" -p tcp --dport "$port" -j DNAT --to-destination ":$target" 2>/dev/null; then
     # Insert after CILIUM_PRE_nat (position 2) if it exists, otherwise position 1
     local pos=1
     if iptables -t nat -L PREROUTING -n --line-numbers 2>/dev/null | grep -q CILIUM_PRE_nat; then
       pos=2
     fi
-    iptables -t nat -I PREROUTING "$pos" -i ens3 -p tcp --dport "$port" \
+    iptables -t nat -I PREROUTING "$pos" -i "$IFACE" -p tcp --dport "$port" \
       -j DNAT --to-destination ":$target" \
       -m comment --comment "etalbaas: DNAT $port to Envoy NodePort $target"
     echo "Added DNAT :$port -> :$target at position $pos"

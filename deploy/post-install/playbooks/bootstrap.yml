@@ -37,12 +37,12 @@
     - role: cloudflare-dns
       tags: [cloudflare-dns]
 
-# --- Tailscale on VPS nodes (requires -i <kubespray inventory>) ---
-- name: Install Tailscale on cluster nodes
+# --- VPS node configuration (requires -i <kubespray inventory>) ---
+- name: Configure VPS nodes (Tailscale + DNAT)
   hosts: kube_control_plane
   become: true
   gather_facts: false
-  tags: [tailscale]
+  tags: [vps-nodes, tailscale, dnat-ingress]
 
   vars_files:
     - ../group_vars/all/vault.yml
@@ -50,6 +50,7 @@
 
   roles:
     - role: tailscale
+      tags: [tailscale]
       when: tailscale_auth_key is defined and tailscale_auth_key | length > 0
     - role: dnat-ingress
       tags: [dnat-ingress]
