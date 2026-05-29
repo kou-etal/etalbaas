@@ -262,5 +262,6 @@ observability:
 
 # ─── Secrets ─────────────────────────────────────────────────────────────────
 secrets:
-  # SealedSecret/Secret containing: JWT_SECRET, DATABASE_URL, S3_ACCESS_KEY, S3_SECRET_KEY
+  # SealedSecret/Secret containing: JWT_SECRET, S3_ACCESS_KEY, S3_SECRET_KEY
+  # DATABASE_URL is sourced from CNPG auto-generated secret (metadb.appSecretName)
   platformSecretName: "platform-secrets"

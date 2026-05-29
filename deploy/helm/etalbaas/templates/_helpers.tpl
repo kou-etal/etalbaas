@@ -96,8 +96,8 @@ Provides PORT, METRICS_PORT, ENV, OTEL endpoint, DATABASE_URL.
 - name: DATABASE_URL
   valueFrom:
     secretKeyRef:
-      name: {{ .Values.secrets.platformSecretName }}
-      key: DATABASE_URL
+      name: {{ .Values.metadb.appSecretName | default "meta-db-app" }}
+      key: uri
 - name: JWT_SECRET
   valueFrom:
     secretKeyRef:

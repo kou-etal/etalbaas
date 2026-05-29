@@ -29,7 +29,7 @@ mkdir -p "$OUTPUT_DIR"
 echo "Sealing platform-secrets..."
 kubectl create secret generic platform-secrets \
   --namespace "$NAMESPACE" \
-  --from-env-file=<(grep -E '^(JWT_SECRET|DATABASE_URL|S3_ACCESS_KEY|S3_SECRET_KEY|GITHUB_OAUTH_SECRET|GOOGLE_OAUTH_SECRET)=' "$ENV_FILE") \
+  --from-env-file=<(grep -E '^(JWT_SECRET|S3_ACCESS_KEY|S3_SECRET_KEY|GITHUB_OAUTH_SECRET|GOOGLE_OAUTH_SECRET)=' "$ENV_FILE") \
   --dry-run=client -o yaml \
   | kubeseal --format yaml \
   > "$OUTPUT_DIR/platform-secrets.yaml"
