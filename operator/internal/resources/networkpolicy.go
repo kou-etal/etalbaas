@@ -225,23 +225,16 @@ func DesiredEgressNetworkPolicy(project *etalbaasv1alpha1.Project, platformNames
 						{Protocol: &tcp, Port: &dnsPort},
 					},
 				},
-				// Allow HTTPS outbound + Kubernetes API server, block cloud metadata services.
-				// Prevents IAM token theft (Capital One 2019-style attack) in multi-tenant env.
-				// Port 6443: kube-proxy DNAT rewrites ClusterIP:443 → node:6443; Calico
-				// evaluates post-DNAT, so 6443 must be allowed for CNPG init jobs.
+				// Allow HTTPS outbound and Kubernetes API server access.
+				// Must use a to-less rule (no destination restriction) because Cilium's
+				// eBPF datapath does NOT match Kubernetes Service ClusterIPs via ipBlock
+				// in egress NetworkPolicy — even with cidr 0.0.0.0/0. CNPG init jobs
+				// must reach the kubernetes API server at ClusterIP (e.g. 10.233.0.1:443).
+				//
+				// Cloud metadata (169.254.169.254 etc.) is safe: those endpoints serve
+				// only on HTTP port 80, which remains blocked by the implicit deny
+				// (no egress rule matches port 80).
 				{
-					To: []networkingv1.NetworkPolicyPeer{
-						{
-							IPBlock: &networkingv1.IPBlock{
-								CIDR: "0.0.0.0/0",
-								Except: []string{
-									"169.254.169.254/32", // AWS / GCP / Azure metadata service
-									"100.100.100.200/32", // Alibaba Cloud metadata service
-									"169.254.170.2/32",   // AWS ECS task metadata endpoint
-								},
-							},
-						},
-					},
 					Ports: []networkingv1.NetworkPolicyPort{
 						{Protocol: &tcp, Port: &httpsPort},
 						{Protocol: &tcp, Port: &apiServerPort},
