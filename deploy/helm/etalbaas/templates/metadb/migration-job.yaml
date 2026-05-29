@@ -25,11 +25,10 @@ spec:
       containers:
         - name: migrate
           image: {{ .Values.metadb.migration.image }}
-          command: ["migrate"]
+          command: ["/bin/sh", "-c"]
           args:
-            - "-path=/migrations"
-            - "-database=$(DATABASE_URL)"
-            - "up"
+            - |
+              migrate -path=/migrations -database="${DATABASE_URL}?search_path=public" up
           env:
             - name: DATABASE_URL
               valueFrom:
