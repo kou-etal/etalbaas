@@ -190,7 +190,6 @@ metadb:
     backup:
       enabled: false
       endpoint: ""
-      region: ""
       bucket: "etalbaas-backups"
       credentialsSecret: "r2-backup-creds"
       schedule: "0 2 * * *"

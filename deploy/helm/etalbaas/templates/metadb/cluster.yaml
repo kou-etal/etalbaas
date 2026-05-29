@@ -40,9 +40,6 @@ spec:
       {{- if .Values.metadb.internal.backup.endpoint }}
       endpointURL: {{ .Values.metadb.internal.backup.endpoint | quote }}
       {{- end }}
-      {{- if .Values.metadb.internal.backup.region }}
-      s3Region: {{ .Values.metadb.internal.backup.region | quote }}
-      {{- end }}
       s3Credentials:
         accessKeyId:
           name: {{ .Values.metadb.internal.backup.credentialsSecret }}

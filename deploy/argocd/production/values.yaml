@@ -78,7 +78,6 @@ metadb:
     backup:
       enabled: true
       endpoint: ""                            # TODO: Replace with R2/S3 endpoint
-      region: "auto"
       bucket: "etalbaas-backups"
       credentialsSecret: "r2-backup-creds"
       schedule: "0 2 * * *"
