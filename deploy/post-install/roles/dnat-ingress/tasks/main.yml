@@ -1,0 +1,24 @@
+---
+# DNAT rules redirect external 80/443 to Envoy Gateway NodePorts.
+# Required because VPS anti-spoofing blocks floating VIP / LoadBalancer.
+# Uses a systemd oneshot service to re-apply rules on boot.
+
+- name: Deploy DNAT script
+  template:
+    src: etalbaas-dnat.sh.j2
+    dest: /usr/local/bin/etalbaas-dnat.sh
+    mode: "0755"
+
+- name: Deploy DNAT systemd service
+  template:
+    src: etalbaas-dnat.service.j2
+    dest: /etc/systemd/system/etalbaas-dnat.service
+    mode: "0644"
+  notify: reload systemd
+
+- name: Enable and run DNAT service
+  systemd:
+    name: etalbaas-dnat
+    enabled: true
+    state: started
+    daemon_reload: true

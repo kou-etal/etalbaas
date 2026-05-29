@@ -1,0 +1,12 @@
+[Unit]
+Description=EtalBaaS DNAT rules for Envoy Gateway NodePort
+After=network.target kubelet.service
+Wants=kubelet.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/etalbaas-dnat.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

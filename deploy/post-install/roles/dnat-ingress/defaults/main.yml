@@ -1,0 +1,5 @@
+---
+# Envoy Gateway NodePort numbers (allocated by Kubernetes).
+# Override in group_vars if NodePorts change.
+envoy_nodeport_https: 30443
+envoy_nodeport_http: 30080

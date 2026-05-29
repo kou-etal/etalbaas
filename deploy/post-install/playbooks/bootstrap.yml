@@ -43,6 +43,13 @@
   become: true
   gather_facts: false
   tags: [tailscale]
+
+  vars_files:
+    - ../group_vars/all/vault.yml
+    - ../group_vars/all/main.yml
+
   roles:
     - role: tailscale
       when: tailscale_auth_key is defined and tailscale_auth_key | length > 0
+    - role: dnat-ingress
+      tags: [dnat-ingress]
