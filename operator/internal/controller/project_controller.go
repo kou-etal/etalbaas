@@ -257,7 +257,7 @@ func (r *ProjectReconciler) reconcileNetworkPolicies(ctx context.Context, projec
 		resources.DesiredAllowPlatformNetworkPolicy(project, r.Config.PlatformNamespace),
 		resources.DesiredAllowCNPGNetworkPolicy(project),
 		resources.DesiredAllowEnvoyGatewayNetworkPolicy(project, "envoy-gateway-system"),
-		resources.DesiredEgressNetworkPolicy(project, r.Config.PlatformNamespace),
+		resources.DesiredEgressNetworkPolicy(project),
 	}
 
 	for _, policy := range policies {

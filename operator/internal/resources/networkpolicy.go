@@ -193,7 +193,7 @@ func DesiredAllowEnvoyGatewayNetworkPolicy(project *etalbaasv1alpha1.Project, ga
 // Security is maintained via port restriction: only specific ports are
 // allowed, and cloud metadata services (169.254.169.254 on port 80) remain
 // blocked by the implicit deny (no rule matches port 80).
-func DesiredEgressNetworkPolicy(project *etalbaasv1alpha1.Project, platformNamespace string) *networkingv1.NetworkPolicy {
+func DesiredEgressNetworkPolicy(project *etalbaasv1alpha1.Project) *networkingv1.NetworkPolicy {
 	namespace := "project-" + project.Name
 	projectID := project.Name
 	userID := project.Labels[LabelUserID]

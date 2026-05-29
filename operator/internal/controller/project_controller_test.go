@@ -526,7 +526,7 @@ func TestDesiredNetworkPolicies(t *testing.T) {
 		t.Errorf("Expected 1 ingress rule, got %d", len(platform.Spec.Ingress))
 	}
 
-	egress := resources.DesiredEgressNetworkPolicy(project, "platform-system")
+	egress := resources.DesiredEgressNetworkPolicy(project)
 	if len(egress.Spec.Egress) != 4 {
 		t.Errorf("Expected 4 egress rules (DNS, HTTPS, intra-ns, NATS), got %d", len(egress.Spec.Egress))
 	}
