@@ -76,7 +76,7 @@ metadb:
     instances: 3
     storage: 20Gi
     backup:
-      enabled: true
+      enabled: false                          # TODO: Enable after R2 setup + r2-backup-creds secret
       endpoint: ""                            # TODO: Replace with R2/S3 endpoint
       bucket: "etalbaas-backups"
       credentialsSecret: "r2-backup-creds"

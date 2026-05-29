@@ -20,6 +20,16 @@ spec:
     pg_hba:
       - hostssl all all 10.0.0.0/8 scram-sha-256
 
+  bootstrap:
+    initdb:
+      database: app
+      owner: app
+      postInitApplicationSQL:
+        - CREATE SCHEMA IF NOT EXISTS auth AUTHORIZATION app
+        - ALTER ROLE app SET search_path TO auth, public, extensions
+        - CREATE EXTENSION IF NOT EXISTS "uuid-ossp"
+        - CREATE EXTENSION IF NOT EXISTS pgcrypto
+
   storage:
     size: {{ .Values.metadb.internal.storage }}
     {{- if .Values.metadb.internal.storageClass }}
@@ -30,8 +40,6 @@ spec:
     {{- toYaml .Values.metadb.internal.resources | nindent 4 }}
 
   enableSuperuserAccess: true
-  superuserSecret:
-    name: meta-db-superuser
 
   {{- if .Values.metadb.internal.backup.enabled }}
   backup:
