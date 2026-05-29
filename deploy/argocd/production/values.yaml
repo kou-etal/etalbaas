@@ -12,6 +12,8 @@ services:
     replicaCount: 2
 
   tenantUser:
+    image:
+      tag: "sha-cf6d418"
     replicaCount: 2
     resources:
       requests:
@@ -22,6 +24,8 @@ services:
         memory: 256Mi
 
   project:
+    image:
+      tag: "sha-cf6d418"
     replicaCount: 2
     resources:
       requests:
@@ -32,6 +36,8 @@ services:
         memory: 256Mi
 
   function:
+    image:
+      tag: "sha-cf6d418"
     replicaCount: 2
     resources:
       requests:
@@ -42,6 +48,8 @@ services:
         memory: 512Mi
 
   event:
+    image:
+      tag: "sha-cf6d418"
     replicaCount: 2
     resources:
       requests:
@@ -53,6 +61,8 @@ services:
 
   storage:
     enabled: true
+    image:
+      tag: "sha-cf6d418"
     replicaCount: 2
     s3:
       endpoint: "https://ec040cd418edb15ac3f422104523fd93.r2.cloudflarestorage.com"
