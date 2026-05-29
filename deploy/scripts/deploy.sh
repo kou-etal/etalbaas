@@ -207,7 +207,7 @@ metadb:
 auth:
   jwt:
     jwksUri: "http://gotrue-dev.platform-system.svc:9999/.well-known/jwks.json"
-    issuer: "https://auth.$DOMAIN"
+    issuer: ""  # GoTrue v2.164.0 does not set iss claim; JWKS verification is sufficient
     audiences: []
 
 gotrue:
