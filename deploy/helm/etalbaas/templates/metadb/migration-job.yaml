@@ -28,7 +28,7 @@ spec:
           command: ["/bin/sh", "-c"]
           args:
             - |
-              migrate -path=/migrations -database="${DATABASE_URL}?search_path=public" up
+              migrate -path=/migrations -database="${DATABASE_URL}?search_path=public&x-migrations-table=golang_migrations" up
           env:
             - name: DATABASE_URL
               valueFrom:
