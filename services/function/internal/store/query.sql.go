@@ -224,9 +224,9 @@ SELECT id, project_id, name, display_name, kind, mode, source_type, source_confi
 WHERE project_id = $1
   AND status != 'deleted'
   AND (
-    $2 IS NULL
-    OR created_at < $2
-    OR (created_at = $2 AND id < $3)
+    $2::timestamptz IS NULL
+    OR created_at < $2::timestamptz
+    OR (created_at = $2::timestamptz AND id < $3)
   )
 ORDER BY created_at DESC, id DESC
 LIMIT $4
@@ -234,7 +234,7 @@ LIMIT $4
 
 type ListFunctionsByProjectIDParams struct {
 	ProjectID       string
-	CursorCreatedAt interface{}
+	CursorCreatedAt pgtype.Timestamptz
 	CursorID        pgtype.UUID
 	PageSize        int32
 }
@@ -296,9 +296,9 @@ WHERE function_id = $1
   AND ($4::timestamptz IS NULL OR created_at >= $4)
   AND ($5::timestamptz IS NULL OR created_at <= $5)
   AND (
-    $6 IS NULL
-    OR created_at < $6
-    OR (created_at = $6 AND id < $7)
+    $6::timestamptz IS NULL
+    OR created_at < $6::timestamptz
+    OR (created_at = $6::timestamptz AND id < $7)
   )
 ORDER BY created_at DESC, id DESC
 LIMIT $8
@@ -310,7 +310,7 @@ type ListInvocationsByFunctionIDParams struct {
 	StatusFilter    *string
 	Since           pgtype.Timestamptz
 	Until           pgtype.Timestamptz
-	CursorCreatedAt interface{}
+	CursorCreatedAt pgtype.Timestamptz
 	CursorID        pgtype.UUID
 	PageSize        int32
 }

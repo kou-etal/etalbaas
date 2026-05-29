@@ -74,7 +74,7 @@ func (s *Service) ListTenants(ctx context.Context, limit int32, cursorCreatedAt 
 	if limit > 101 {
 		limit = 101
 	}
-	var cursorTS interface{}
+	var cursorTS pgtype.Timestamptz
 	if cursorCreatedAt != nil {
 		cursorTS = pgtype.Timestamptz{Time: *cursorCreatedAt, Valid: true}
 	}

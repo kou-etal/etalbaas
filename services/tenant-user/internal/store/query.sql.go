@@ -39,16 +39,16 @@ SELECT id, email, display_name, avatar_url, plan, status, created_at, updated_at
 FROM tenants
 WHERE status != 'deleted'
   AND (
-    $1 IS NULL
-    OR created_at < $1
-    OR (created_at = $1 AND id < $2)
+    $1::timestamptz IS NULL
+    OR created_at < $1::timestamptz
+    OR (created_at = $1::timestamptz AND id < $2)
   )
 ORDER BY created_at DESC, id DESC
 LIMIT $3
 `
 
 type ListTenantsParams struct {
-	CursorCreatedAt interface{}
+	CursorCreatedAt pgtype.Timestamptz
 	CursorID        pgtype.UUID
 	PageSize        int32
 }

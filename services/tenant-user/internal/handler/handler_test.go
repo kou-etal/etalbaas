@@ -10,7 +10,6 @@ import (
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/kou-etal/etalbaas/pkg/requestctx"
 	commonv1 "github.com/kou-etal/etalbaas/proto/gen/go/etalbaas/common/v1"
@@ -337,12 +336,11 @@ func TestListTenants_CompoundCursorPassedToStore(t *testing.T) {
 
 	q := &mockQuerier{
 		listTenantsFn: func(_ context.Context, arg store.ListTenantsParams) ([]store.Tenant, error) {
-			ts, ok := arg.CursorCreatedAt.(pgtype.Timestamptz)
-			if !ok || !ts.Valid {
+			if !arg.CursorCreatedAt.Valid {
 				t.Fatal("expected valid cursor_created_at")
 			}
-			if !ts.Time.Equal(cursorTime) {
-				t.Fatalf("cursor time mismatch: got %v, want %v", ts.Time, cursorTime)
+			if !arg.CursorCreatedAt.Time.Equal(cursorTime) {
+				t.Fatalf("cursor time mismatch: got %v, want %v", arg.CursorCreatedAt.Time, cursorTime)
 			}
 			if !arg.CursorID.Valid {
 				t.Fatal("expected valid cursor_id")

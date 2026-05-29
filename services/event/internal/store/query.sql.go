@@ -78,9 +78,9 @@ WHERE function_id = $1
   AND ($4::timestamptz IS NULL OR created_at >= $4)
   AND ($5::timestamptz IS NULL OR created_at <= $5)
   AND (
-    $6 IS NULL
-    OR created_at < $6
-    OR (created_at = $6 AND id < $7)
+    $6::timestamptz IS NULL
+    OR created_at < $6::timestamptz
+    OR (created_at = $6::timestamptz AND id < $7)
   )
 ORDER BY created_at DESC, id DESC
 LIMIT $8
@@ -92,7 +92,7 @@ type ListEventHistoryByFunctionIDParams struct {
 	StatusFilter    *string
 	Since           pgtype.Timestamptz
 	Until           pgtype.Timestamptz
-	CursorCreatedAt interface{}
+	CursorCreatedAt pgtype.Timestamptz
 	CursorID        pgtype.UUID
 	PageSize        int32
 }

@@ -251,9 +251,9 @@ const listApiKeysByProjectID = `-- name: ListApiKeysByProjectID :many
 SELECT id, project_id, name, key_hash, key_prefix, role, expires_at, revoked_at, created_at FROM api_keys
 WHERE project_id = $1
   AND (
-    $2 IS NULL
-    OR created_at < $2
-    OR (created_at = $2 AND id < $3)
+    $2::timestamptz IS NULL
+    OR created_at < $2::timestamptz
+    OR (created_at = $2::timestamptz AND id < $3)
   )
 ORDER BY created_at DESC, id DESC
 LIMIT $4
@@ -261,7 +261,7 @@ LIMIT $4
 
 type ListApiKeysByProjectIDParams struct {
 	ProjectID       string
-	CursorCreatedAt interface{}
+	CursorCreatedAt pgtype.Timestamptz
 	CursorID        pgtype.UUID
 	PageSize        int32
 }
@@ -306,9 +306,9 @@ SELECT id, tenant_id, display_name, description, status, postgres_enabled, postg
 WHERE tenant_id = $1
   AND status != 'deleted'
   AND (
-    $2 IS NULL
-    OR created_at < $2
-    OR (created_at = $2 AND id < $3)
+    $2::timestamptz IS NULL
+    OR created_at < $2::timestamptz
+    OR (created_at = $2::timestamptz AND id < $3)
   )
 ORDER BY created_at DESC, id DESC
 LIMIT $4
@@ -316,7 +316,7 @@ LIMIT $4
 
 type ListProjectsByTenantIDParams struct {
 	TenantID        uuid.UUID
-	CursorCreatedAt interface{}
+	CursorCreatedAt pgtype.Timestamptz
 	CursorID        *string
 	PageSize        int32
 }
@@ -362,9 +362,9 @@ const listSecretsByProjectID = `-- name: ListSecretsByProjectID :many
 SELECT id, project_id, name, description, created_at, updated_at FROM secrets_metadata
 WHERE project_id = $1
   AND (
-    $2 IS NULL
-    OR created_at < $2
-    OR (created_at = $2 AND id < $3)
+    $2::timestamptz IS NULL
+    OR created_at < $2::timestamptz
+    OR (created_at = $2::timestamptz AND id < $3)
   )
 ORDER BY created_at DESC, id DESC
 LIMIT $4
@@ -372,7 +372,7 @@ LIMIT $4
 
 type ListSecretsByProjectIDParams struct {
 	ProjectID       string
-	CursorCreatedAt interface{}
+	CursorCreatedAt pgtype.Timestamptz
 	CursorID        pgtype.UUID
 	PageSize        int32
 }

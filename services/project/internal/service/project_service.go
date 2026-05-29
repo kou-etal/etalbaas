@@ -202,7 +202,7 @@ func (s *ProjectService) ListProjects(ctx context.Context, tenantID uuid.UUID, l
 	if limit > 101 {
 		limit = 101
 	}
-	var cursorTS interface{} // nil → SQL NULL; pgtype.Timestamptz{Valid:false} via interface{} causes pgx OID resolution failure
+	var cursorTS pgtype.Timestamptz
 	if cursorCreatedAt != nil {
 		cursorTS = pgtype.Timestamptz{Time: *cursorCreatedAt, Valid: true}
 	}
@@ -386,7 +386,7 @@ func (s *ProjectService) ListApiKeys(ctx context.Context, tenantID uuid.UUID, pr
 	if limit > 101 {
 		limit = 101
 	}
-	var cursorTS interface{}
+	var cursorTS pgtype.Timestamptz
 	if cursorCreatedAt != nil {
 		cursorTS = pgtype.Timestamptz{Time: *cursorCreatedAt, Valid: true}
 	}

@@ -21,9 +21,9 @@ SELECT * FROM functions
 WHERE project_id = sqlc.arg('project_id')
   AND status != 'deleted'
   AND (
-    sqlc.narg('cursor_created_at') IS NULL
-    OR created_at < sqlc.narg('cursor_created_at')
-    OR (created_at = sqlc.narg('cursor_created_at') AND id < sqlc.narg('cursor_id'))
+    sqlc.narg('cursor_created_at')::timestamptz IS NULL
+    OR created_at < sqlc.narg('cursor_created_at')::timestamptz
+    OR (created_at = sqlc.narg('cursor_created_at')::timestamptz AND id < sqlc.narg('cursor_id'))
   )
 ORDER BY created_at DESC, id DESC
 LIMIT sqlc.arg('page_size');
@@ -78,9 +78,9 @@ WHERE function_id = sqlc.arg('function_id')
   AND (sqlc.narg('since')::timestamptz IS NULL OR created_at >= sqlc.narg('since'))
   AND (sqlc.narg('until')::timestamptz IS NULL OR created_at <= sqlc.narg('until'))
   AND (
-    sqlc.narg('cursor_created_at') IS NULL
-    OR created_at < sqlc.narg('cursor_created_at')
-    OR (created_at = sqlc.narg('cursor_created_at') AND id < sqlc.narg('cursor_id'))
+    sqlc.narg('cursor_created_at')::timestamptz IS NULL
+    OR created_at < sqlc.narg('cursor_created_at')::timestamptz
+    OR (created_at = sqlc.narg('cursor_created_at')::timestamptz AND id < sqlc.narg('cursor_id'))
   )
 ORDER BY created_at DESC, id DESC
 LIMIT sqlc.arg('page_size');

@@ -16,9 +16,9 @@ SELECT id, email, display_name, avatar_url, plan, status, created_at, updated_at
 FROM tenants
 WHERE status != 'deleted'
   AND (
-    sqlc.narg('cursor_created_at') IS NULL
-    OR created_at < sqlc.narg('cursor_created_at')
-    OR (created_at = sqlc.narg('cursor_created_at') AND id < sqlc.narg('cursor_id'))
+    sqlc.narg('cursor_created_at')::timestamptz IS NULL
+    OR created_at < sqlc.narg('cursor_created_at')::timestamptz
+    OR (created_at = sqlc.narg('cursor_created_at')::timestamptz AND id < sqlc.narg('cursor_id'))
   )
 ORDER BY created_at DESC, id DESC
 LIMIT sqlc.arg('page_size');

@@ -16,9 +16,9 @@ SELECT * FROM projects
 WHERE tenant_id = sqlc.arg('tenant_id')
   AND status != 'deleted'
   AND (
-    sqlc.narg('cursor_created_at') IS NULL
-    OR created_at < sqlc.narg('cursor_created_at')
-    OR (created_at = sqlc.narg('cursor_created_at') AND id < sqlc.narg('cursor_id'))
+    sqlc.narg('cursor_created_at')::timestamptz IS NULL
+    OR created_at < sqlc.narg('cursor_created_at')::timestamptz
+    OR (created_at = sqlc.narg('cursor_created_at')::timestamptz AND id < sqlc.narg('cursor_id'))
   )
 ORDER BY created_at DESC, id DESC
 LIMIT sqlc.arg('page_size');
@@ -45,9 +45,9 @@ RETURNING *;
 SELECT * FROM api_keys
 WHERE project_id = sqlc.arg('project_id')
   AND (
-    sqlc.narg('cursor_created_at') IS NULL
-    OR created_at < sqlc.narg('cursor_created_at')
-    OR (created_at = sqlc.narg('cursor_created_at') AND id < sqlc.narg('cursor_id'))
+    sqlc.narg('cursor_created_at')::timestamptz IS NULL
+    OR created_at < sqlc.narg('cursor_created_at')::timestamptz
+    OR (created_at = sqlc.narg('cursor_created_at')::timestamptz AND id < sqlc.narg('cursor_id'))
   )
 ORDER BY created_at DESC, id DESC
 LIMIT sqlc.arg('page_size');
@@ -74,9 +74,9 @@ WHERE id = $1 AND project_id = $2;
 SELECT * FROM secrets_metadata
 WHERE project_id = sqlc.arg('project_id')
   AND (
-    sqlc.narg('cursor_created_at') IS NULL
-    OR created_at < sqlc.narg('cursor_created_at')
-    OR (created_at = sqlc.narg('cursor_created_at') AND id < sqlc.narg('cursor_id'))
+    sqlc.narg('cursor_created_at')::timestamptz IS NULL
+    OR created_at < sqlc.narg('cursor_created_at')::timestamptz
+    OR (created_at = sqlc.narg('cursor_created_at')::timestamptz AND id < sqlc.narg('cursor_id'))
   )
 ORDER BY created_at DESC, id DESC
 LIMIT sqlc.arg('page_size');
