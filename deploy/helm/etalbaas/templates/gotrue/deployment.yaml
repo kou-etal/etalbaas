@@ -51,13 +51,6 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.secrets.platformSecretName }}
                   key: JWT_SECRET
-            {{- if .Values.gotrue.jwt.useAsymmetric }}
-            - name: GOTRUE_JWT_KEYS
-              valueFrom:
-                secretKeyRef:
-                  name: gotrue-jwt-keys
-                  key: jwk-set
-            {{- end }}
             - name: GOTRUE_JWT_EXP
               value: {{ .Values.gotrue.jwt.exp | quote }}
             - name: GOTRUE_JWT_DEFAULT_GROUP_NAME
