@@ -15,4 +15,5 @@ spec:
     - "*.api.{{ include "etalbaas.baseDomain" . }}"
     - "api.{{ include "etalbaas.baseDomain" . }}"
     - "dashboard.{{ include "etalbaas.baseDomain" . }}"
+    - "auth.{{ include "etalbaas.baseDomain" . }}"
 {{- end }}
