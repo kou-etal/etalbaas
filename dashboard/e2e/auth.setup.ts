@@ -1,4 +1,5 @@
 import { test as setup, expect } from "@playwright/test";
+import { cleanupE2eProjects } from "./helpers/api";
 
 // Allow self-signed certificates for API calls to Kind cluster
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
@@ -106,6 +107,9 @@ setup("authenticate", async ({ page, context }) => {
         `(API response: ${meRes.status} ${body})`
     );
   }
+
+  // 2.6. Clean up stale e2e projects from previous runs to avoid 429 (project limit)
+  await cleanupE2eProjects();
 
   // 3. Navigate to login page to establish origin
   await page.goto("/login");

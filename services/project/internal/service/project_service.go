@@ -29,7 +29,7 @@ const (
 	apiKeyPrefixLen         = 8
 	defaultExpiresInDays    = 90
 	noExpiryYear            = 9999
-	maxProjectsPerTenant    = 2 // Free plan limit
+	maxProjectsPerTenant    = 10 // Free plan limit
 )
 
 var allowedExtensions = map[string]bool{

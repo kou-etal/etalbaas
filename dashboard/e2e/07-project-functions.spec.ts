@@ -294,8 +294,10 @@ test.describe.serial("Project Functions Tab", () => {
       await expect(rowChecks.nth(i)).not.toBeChecked();
     }
 
-    // Clean up
-    await rowChecks.first().uncheck({ force: true });
+    // Clean up — skip if already unchecked (avoids flaky timeout)
+    if (await rowChecks.first().isChecked()) {
+      await rowChecks.first().uncheck({ force: true });
+    }
   });
 
   /* ------------------------------------------------------------------ */
