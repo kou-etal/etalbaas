@@ -15,12 +15,14 @@ cilium_encryption_type: wireguard
 cilium_hubble_enabled: true
 cilium_hubble_relay_enabled: true
 
-# kube-vip: Control Plane VIP + Service LoadBalancer (ARP mode)
-kube_vip_enabled: true
-kube_vip_controlplane_enabled: true
-kube_vip_address: "162.43.46.85"
-kube_vip_services_enabled: true
-kube_vip_arp_enabled: true
+# kube-vip: Disabled until Xserver additional/floating IP is available.
+# VPS anti-spoofing blocks GARP for unassigned IPs, making floating VIP impossible.
+# Phase 2: acquire additional IP from Xserver, then re-enable.
+kube_vip_enabled: false
+kube_vip_controlplane_enabled: false
+kube_vip_address: ""
+kube_vip_services_enabled: false
+kube_vip_arp_enabled: false
 
 # Local Path Provisioner (NVMe SSD storage for PVCs)
 local_path_provisioner_enabled: true
@@ -38,9 +40,12 @@ audit_log_maxsize: 100
 # Pod Security Standards (baseline enforcement)
 kube_pod_security_use_default: true
 
-# Additional API server SANs (for external kubectl access)
+# Additional API server SANs (for external kubectl access via Tailscale)
 supplementary_addresses_in_ssl_keys:
   - "162.43.46.85"
+  - "162.43.48.110"
+  - "100.97.104.58"   # node-01 Tailscale IP
+  - "100.67.103.11"   # node-02 Tailscale IP
 
 # kubelet resource reservation (prevent system OOM)
 kubelet_system_reserved: true
