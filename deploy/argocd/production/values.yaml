@@ -6,6 +6,8 @@ global:
   baseDomain: "etalbaas.example.com"        # TODO: Replace with actual domain
   environment: "production"
   imageRegistry: "ghcr.io/kou-etal"
+  imagePullSecrets:
+    - name: ghcr-pull-secret
 
 services:
   common:
