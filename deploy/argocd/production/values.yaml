@@ -85,11 +85,10 @@ auth:
   jwt:
     jwksUri: "http://gotrue-dev.platform-system.svc:9999/.well-known/jwks.json"
     issuer: "https://auth.etalbaas.com"
-    audiences:
-      - "authenticated"
+    audiences: []
 
 gotrue:
   externalUrl: "https://auth.etalbaas.com"
   siteUrl: "https://dashboard.etalbaas.com"
   jwt:
-    useAsymmetric: false
+    useAsymmetric: true

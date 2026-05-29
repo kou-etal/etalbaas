@@ -253,8 +253,7 @@ auth:
   jwt:
     jwksUri: "http://gotrue-dev.platform-system.svc:9999/.well-known/jwks.json"
     issuer: ""  # Set to GoTrue API_EXTERNAL_URL in production (e.g., "https://auth.example.com")
-    audiences:
-      - "authenticated"
+    audiences: []  # GoTrue does not set aud claim reliably; skip audience check
 
 # ─── Observability ───────────────────────────────────────────────────────────
 observability:

@@ -208,14 +208,13 @@ auth:
   jwt:
     jwksUri: "http://gotrue-dev.platform-system.svc:9999/.well-known/jwks.json"
     issuer: "https://auth.$DOMAIN"
-    audiences:
-      - "authenticated"
+    audiences: []
 
 gotrue:
   externalUrl: "https://auth.$DOMAIN"
   siteUrl: "https://dashboard.$DOMAIN"
   jwt:
-    useAsymmetric: false
+    useAsymmetric: true
 EOF
 }
 
