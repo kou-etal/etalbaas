@@ -42,7 +42,7 @@ spec:
             - name: NATS_URL
               value: {{ .Values.services.storage.natsUrl | default "" | quote }}
             - name: S3_ENDPOINT
-              value: {{ .Values.services.storage.s3.endpoint | quote }}
+              value: {{ .Values.services.storage.s3.endpoint | trimPrefix "https://" | trimPrefix "http://" | quote }}
             - name: S3_BUCKET
               value: {{ .Values.services.storage.s3.bucket | quote }}
             - name: S3_REGION
