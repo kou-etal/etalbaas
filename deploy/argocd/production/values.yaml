@@ -54,6 +54,7 @@ services:
         memory: 256Mi
 
   storage:
+    enabled: false                            # TODO: Enable after S3/R2 setup
     replicaCount: 2
     s3:
       endpoint: ""                            # TODO: Replace with R2/MinIO endpoint
@@ -94,3 +95,5 @@ auth:
 gotrue:
   externalUrl: "https://auth.etalbaas.example.com"    # TODO: Replace
   siteUrl: "https://dashboard.etalbaas.example.com"   # TODO: Replace
+  jwt:
+    useAsymmetric: false                              # Phase 1: symmetric JWT
