@@ -31,10 +31,25 @@ tr -d '\r' < "$ENV_FILE" > "$ENV_CLEAN"
 trap 'rm -f "$ENV_CLEAN"' EXIT
 
 # --- platform-secrets ---
+# Map secrets.env key names to the key names expected by Helm templates.
+S3_AK=$(grep '^S3_ACCESS_KEY_ID=' "$ENV_CLEAN" | cut -d= -f2- || true)
+S3_SK=$(grep '^S3_SECRET_ACCESS_KEY=' "$ENV_CLEAN" | cut -d= -f2- || true)
+JWT=$(grep '^JWT_SECRET=' "$ENV_CLEAN" | cut -d= -f2- || true)
+GH_OAUTH=$(grep '^GITHUB_OAUTH_SECRET=' "$ENV_CLEAN" | cut -d= -f2- || true)
+GO_OAUTH=$(grep '^GOOGLE_OAUTH_SECRET=' "$ENV_CLEAN" | cut -d= -f2- || true)
+
 echo "Sealing platform-secrets..."
+PLATFORM_ARGS=(
+  --namespace "$NAMESPACE"
+  --from-literal=JWT_SECRET="$JWT"
+)
+[[ -z "$S3_AK" ]] || PLATFORM_ARGS+=(--from-literal=S3_ACCESS_KEY="$S3_AK")
+[[ -z "$S3_SK" ]] || PLATFORM_ARGS+=(--from-literal=S3_SECRET_KEY="$S3_SK")
+[[ -z "$GH_OAUTH" ]] || PLATFORM_ARGS+=(--from-literal=GITHUB_OAUTH_SECRET="$GH_OAUTH")
+[[ -z "$GO_OAUTH" ]] || PLATFORM_ARGS+=(--from-literal=GOOGLE_OAUTH_SECRET="$GO_OAUTH")
+
 kubectl create secret generic platform-secrets \
-  --namespace "$NAMESPACE" \
-  --from-env-file=<(grep -E '^(JWT_SECRET|S3_ACCESS_KEY|S3_SECRET_KEY|GITHUB_OAUTH_SECRET|GOOGLE_OAUTH_SECRET)=' "$ENV_CLEAN") \
+  "${PLATFORM_ARGS[@]}" \
   --dry-run=client -o yaml \
   | kubeseal --format yaml \
   > "$OUTPUT_DIR/platform-secrets.yaml"
@@ -91,8 +106,8 @@ if [[ -n "$GHCR_USER" && -n "$GHCR_TOKEN" ]]; then
 fi
 
 # --- r2-backup-creds (CNPG barman S3 backup) ---
-R2_AK=$(grep '^R2_BACKUP_ACCESS_KEY_ID=' "$ENV_CLEAN" | cut -d= -f2- || true)
-R2_SK=$(grep '^R2_BACKUP_SECRET_ACCESS_KEY=' "$ENV_CLEAN" | cut -d= -f2- || true)
+R2_AK=$(grep '^S3_BACKUP_ACCESS_KEY_ID=' "$ENV_CLEAN" | cut -d= -f2- || true)
+R2_SK=$(grep '^S3_BACKUP_SECRET_ACCESS_KEY=' "$ENV_CLEAN" | cut -d= -f2- || true)
 if [[ -n "$R2_AK" && -n "$R2_SK" ]]; then
   echo "Sealing r2-backup-creds..."
   kubectl create secret generic r2-backup-creds \
