@@ -144,6 +144,13 @@ gateway:
   enabled: true
   gatewayClassName: "envoy-gateway"
   controllerName: "gateway.envoyproxy.io/gatewayclass-controller"
+  # NodePort: VPS anti-spoofing blocks floating VIP / LoadBalancer.
+  # External traffic reaches Envoy via iptables DNAT (80→NodePort, 443→NodePort).
+  serviceType: "NodePort"
+  nodePorts:
+    http: 30080
+    https: 30443
+    postgres: 30432
   listeners:
     http:
       port: 80

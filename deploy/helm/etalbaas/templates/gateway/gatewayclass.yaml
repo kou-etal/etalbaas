@@ -7,4 +7,9 @@ metadata:
     {{- include "etalbaas.labels" . | nindent 4 }}
 spec:
   controllerName: {{ .Values.gateway.controllerName | quote }}
+  parametersRef:
+    group: gateway.envoyproxy.io
+    kind: EnvoyProxy
+    name: envoy-proxy-config
+    namespace: envoy-gateway-system
 {{- end }}
