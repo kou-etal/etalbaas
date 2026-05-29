@@ -2,20 +2,21 @@
 cloudflare_dns_ttl: 300
 cloudflare_dns_proxied: false
 
-# VIP address (kube-vip virtual IP)
-cloudflare_dns_vip: "203.0.113.100"
-
 # Records to create (wildcard + bare domains)
+# public_ingress_ip is defined in group_vars/all/main.yml
 cloudflare_dns_records:
   - name: "*.api.{{ base_domain }}"
     type: A
-    value: "{{ cloudflare_dns_vip }}"
+    value: "{{ public_ingress_ip }}"
   - name: "*.db.{{ base_domain }}"
     type: A
-    value: "{{ cloudflare_dns_vip }}"
+    value: "{{ public_ingress_ip }}"
   - name: "api.{{ base_domain }}"
     type: A
-    value: "{{ cloudflare_dns_vip }}"
+    value: "{{ public_ingress_ip }}"
+  - name: "auth.{{ base_domain }}"
+    type: A
+    value: "{{ public_ingress_ip }}"
   - name: "dashboard.{{ base_domain }}"
     type: A
-    value: "{{ cloudflare_dns_vip }}"
+    value: "{{ public_ingress_ip }}"

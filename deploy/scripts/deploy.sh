@@ -4,7 +4,7 @@ set -euo pipefail
 # EtalBaaS Full Deployment Script
 #
 # Config files (edit before running):
-#   - deploy/post-install/group_vars/all/main.yml        (domain, VIP, S3 — plaintext, committed)
+#   - deploy/post-install/group_vars/all/main.yml        (domain, ingress IP, S3 — plaintext, committed)
 #   - deploy/kubespray/inventory/production/hosts.yaml   (node IPs — gitignored)
 #   - deploy/post-install/group_vars/all/vault.yml       (infra secrets — encrypted, gitignored)
 #   - deploy/post-install/.vault-password                 (vault password — gitignored)
@@ -83,14 +83,14 @@ validate_config() {
   [[ -f "$VAULT_PW_FILE" ]] || err ".vault-password not found."
 
   DOMAIN="$(yaml_val "$MAIN_VARS" base_domain)"
-  VIP="$(yaml_val "$MAIN_VARS" kube_vip_address)"
+  INGRESS_IP="$(yaml_val "$MAIN_VARS" public_ingress_ip)"
   NODE1_IP="$(first_node_ip)"
   SSH_USER="$(ssh_var ansible_user root)"
   SSH_KEY="$(ssh_var ansible_ssh_private_key_file '~/.ssh/id_rsa')"
 
-  [[ "$DOMAIN" != "yourdomain.com" ]] || err "base_domain is still placeholder in main.yml"
-  [[ "$VIP" != "203.0.113.100" ]]     || err "kube_vip_address is still placeholder in main.yml"
-  [[ "$NODE1_IP" != "203.0.113.10" ]] || err "node IPs are still placeholders in hosts.yaml"
+  [[ "$DOMAIN" != "yourdomain.com" ]]    || err "base_domain is still placeholder in main.yml"
+  [[ "$INGRESS_IP" != "203.0.113.100" ]] || err "public_ingress_ip is still placeholder in main.yml"
+  [[ "$NODE1_IP" != "203.0.113.10" ]]    || err "node IPs are still placeholders in hosts.yaml"
 }
 
 # ─── Generate production Helm values from main.yml ───────────────────────────
@@ -257,7 +257,7 @@ stage_cluster() {
   log "Fetching kubeconfig from $NODE1_IP..."
   mkdir -p "$HOME/.kube"
   ssh -i "$SSH_KEY" "${SSH_USER}@${NODE1_IP}" "cat /etc/kubernetes/admin.conf" \
-    | sed "s|server: https://127.0.0.1:6443|server: https://${VIP}:6443|" \
+    | sed "s|server: https://127.0.0.1:6443|server: https://${NODE1_IP}:6443|" \
     > "$HOME/.kube/config"
   chmod 600 "$HOME/.kube/config"
 

@@ -7,6 +7,7 @@
     value: "{{ item.value }}"
     ttl: "{{ cloudflare_dns_ttl }}"
     proxied: "{{ cloudflare_dns_proxied }}"
+    solo: true
     state: present
     api_token: "{{ cloudflare_api_token }}"
   loop: "{{ cloudflare_dns_records }}"
