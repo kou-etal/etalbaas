@@ -40,7 +40,10 @@ spec:
             - name: GOTRUE_DB_DRIVER
               value: "postgres"
             - name: GOTRUE_DB_DATABASE_URL
-              value: "postgres://etalbaas:etalbaas@meta-db-rw.{{ include "etalbaas.namespace" . }}.svc:5432/etalbaas_auth?sslmode=disable"
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.metadb.appSecretName | default "meta-db-app" }}
+                  key: uri
             - name: GOTRUE_DB_NAMESPACE
               value: "auth"
             - name: GOTRUE_JWT_SECRET
