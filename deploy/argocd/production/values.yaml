@@ -13,7 +13,7 @@ services:
 
   tenantUser:
     image:
-      tag: "sha-b0c7ced"
+      tag: "sha-2864617"
     replicaCount: 2
     resources:
       requests:
@@ -25,7 +25,7 @@ services:
 
   project:
     image:
-      tag: "sha-b0c7ced"
+      tag: "sha-2864617"
     replicaCount: 2
     resources:
       requests:
@@ -37,7 +37,7 @@ services:
 
   function:
     image:
-      tag: "sha-b0c7ced"
+      tag: "sha-2864617"
     replicaCount: 2
     resources:
       requests:
@@ -49,7 +49,7 @@ services:
 
   event:
     image:
-      tag: "sha-b0c7ced"
+      tag: "sha-2864617"
     replicaCount: 2
     resources:
       requests:
@@ -62,7 +62,7 @@ services:
   storage:
     enabled: true
     image:
-      tag: "sha-b0c7ced"
+      tag: "sha-2864617"
     replicaCount: 2
     s3:
       endpoint: "https://ec040cd418edb15ac3f422104523fd93.r2.cloudflarestorage.com"
@@ -96,6 +96,14 @@ auth:
     jwksUri: "http://gotrue-dev.platform-system.svc:9999/.well-known/jwks.json"
     issuer: ""  # GoTrue v2.164.0 does not set iss claim; JWKS verification is sufficient
     audiences: []
+
+operator:
+  image:
+    tag: "sha-2864617"
+
+dashboard:
+  image:
+    tag: "sha-2864617"
 
 gotrue:
   externalUrl: "https://auth.etalbaas.com"
