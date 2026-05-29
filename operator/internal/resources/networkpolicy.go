@@ -180,9 +180,19 @@ func DesiredAllowEnvoyGatewayNetworkPolicy(project *etalbaasv1alpha1.Project, ga
 }
 
 // DesiredEgressNetworkPolicy creates a NetworkPolicy restricting egress traffic.
-// Allows: DNS (kube-system:53), HTTPS (443), intra-namespace,
-//         NATS (platform-system:4222), Storage REST (platform-system:8080).
-// Blocks: cloud metadata services (169.254.169.254, etc.) to prevent IAM token theft.
+// Allows: DNS (53), HTTPS (443), API server (6443), intra-namespace,
+//
+//	NATS (4222), Storage REST (8080).
+//
+// All cross-namespace rules use to-less (port-only) form because Cilium's
+// eBPF datapath does NOT match Kubernetes Service ClusterIPs via
+// NamespaceSelector or ipBlock in egress NetworkPolicy. Traffic to
+// ClusterIPs (e.g. CoreDNS 10.233.0.3, API server 10.233.0.1) is silently
+// dropped when a To selector is present.
+//
+// Security is maintained via port restriction: only specific ports are
+// allowed, and cloud metadata services (169.254.169.254 on port 80) remain
+// blocked by the implicit deny (no rule matches port 80).
 func DesiredEgressNetworkPolicy(project *etalbaasv1alpha1.Project, platformNamespace string) *networkingv1.NetworkPolicy {
 	namespace := "project-" + project.Name
 	projectID := project.Name
@@ -209,31 +219,14 @@ func DesiredEgressNetworkPolicy(project *etalbaasv1alpha1.Project, platformNames
 				networkingv1.PolicyTypeEgress,
 			},
 			Egress: []networkingv1.NetworkPolicyEgressRule{
-				// Allow DNS to kube-system
+				// Allow DNS (to-less: Cilium drops ClusterIP traffic with NamespaceSelector)
 				{
-					To: []networkingv1.NetworkPolicyPeer{
-						{
-							NamespaceSelector: &metav1.LabelSelector{
-								MatchLabels: map[string]string{
-									"kubernetes.io/metadata.name": "kube-system",
-								},
-							},
-						},
-					},
 					Ports: []networkingv1.NetworkPolicyPort{
 						{Protocol: &udp, Port: &dnsPort},
 						{Protocol: &tcp, Port: &dnsPort},
 					},
 				},
-				// Allow HTTPS outbound and Kubernetes API server access.
-				// Must use a to-less rule (no destination restriction) because Cilium's
-				// eBPF datapath does NOT match Kubernetes Service ClusterIPs via ipBlock
-				// in egress NetworkPolicy — even with cidr 0.0.0.0/0. CNPG init jobs
-				// must reach the kubernetes API server at ClusterIP (e.g. 10.233.0.1:443).
-				//
-				// Cloud metadata (169.254.169.254 etc.) is safe: those endpoints serve
-				// only on HTTP port 80, which remains blocked by the implicit deny
-				// (no egress rule matches port 80).
+				// Allow HTTPS outbound and Kubernetes API server access
 				{
 					Ports: []networkingv1.NetworkPolicyPort{
 						{Protocol: &tcp, Port: &httpsPort},
@@ -248,17 +241,8 @@ func DesiredEgressNetworkPolicy(project *etalbaasv1alpha1.Project, platformNames
 						},
 					},
 				},
-				// Allow NATS + Storage REST in platform-system
+				// Allow NATS + Storage REST (to-less: same Cilium ClusterIP limitation)
 				{
-					To: []networkingv1.NetworkPolicyPeer{
-						{
-							NamespaceSelector: &metav1.LabelSelector{
-								MatchLabels: map[string]string{
-									"kubernetes.io/metadata.name": platformNamespace,
-								},
-							},
-						},
-					},
 					Ports: []networkingv1.NetworkPolicyPort{
 						{Protocol: &tcp, Port: &natsPort},
 						{Protocol: &tcp, Port: &storagePort},
