@@ -99,7 +99,7 @@ auth:
 
 operator:
   image:
-    tag: "sha-2864617"
+    tag: "sha-8e6fb82"
 
 dashboard:
   image:
