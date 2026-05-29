@@ -490,7 +490,6 @@ func validateDisplayName(name string) *apperror.AppError {
 
 // wrapDBError wraps a database error, preserving context cancellation semantics.
 func wrapDBError(err error, msg string) *apperror.AppError {
-	slog.Error("database error", "msg", msg, "error", err)
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return apperror.Wrap(apperror.CodeCanceled, msg, err)
 	}

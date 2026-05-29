@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"errors"
-	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -95,7 +94,6 @@ func (s *Service) ListTenants(ctx context.Context, limit int32, cursorCreatedAt 
 
 // wrapDBError wraps a database error, preserving context cancellation semantics.
 func wrapDBError(err error, msg string) *apperror.AppError {
-	slog.Error("database error", "msg", msg, "error", err)
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return apperror.Wrap(apperror.CodeCanceled, msg, err)
 	}

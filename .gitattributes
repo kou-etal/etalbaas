@@ -1,0 +1,2 @@
+# Force LF for all Go files (avoid CRLF noise from sqlc on Windows)
+*.go text eol=lf
