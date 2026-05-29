@@ -72,9 +72,11 @@ func (s *EventService) ListEventHistory(ctx context.Context, p ListEventHistoryP
 		until = pgtype.Timestamptz{Time: *p.Until, Valid: true}
 	}
 
-	cursorTS := pgtype.Timestamptz{}
+	var cursorTSTyped pgtype.Timestamptz
+	var cursorTS interface{} // nil → SQL NULL for interface{} params
 	if p.CursorCreatedAt != nil {
-		cursorTS = pgtype.Timestamptz{Time: *p.CursorCreatedAt, Valid: true}
+		cursorTSTyped = pgtype.Timestamptz{Time: *p.CursorCreatedAt, Valid: true}
+		cursorTS = cursorTSTyped
 	}
 	var cursorUUID pgtype.UUID
 	if p.CursorID != nil {
@@ -102,7 +104,7 @@ func (s *EventService) ListEventHistory(ctx context.Context, p ListEventHistoryP
 			StatusFilter:    p.StatusFilter,
 			Since:           since,
 			Until:           until,
-			CursorCreatedAt: cursorTS,
+			CursorCreatedAt: cursorTSTyped,
 			CursorID:        cursorUUID,
 			PageSize:        p.Limit,
 		})

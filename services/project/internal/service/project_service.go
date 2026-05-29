@@ -202,7 +202,7 @@ func (s *ProjectService) ListProjects(ctx context.Context, tenantID uuid.UUID, l
 	if limit > 101 {
 		limit = 101
 	}
-	cursorTS := pgtype.Timestamptz{}
+	var cursorTS interface{} // nil → SQL NULL; pgtype.Timestamptz{Valid:false} via interface{} causes pgx OID resolution failure
 	if cursorCreatedAt != nil {
 		cursorTS = pgtype.Timestamptz{Time: *cursorCreatedAt, Valid: true}
 	}
@@ -386,7 +386,7 @@ func (s *ProjectService) ListApiKeys(ctx context.Context, tenantID uuid.UUID, pr
 	if limit > 101 {
 		limit = 101
 	}
-	cursorTS := pgtype.Timestamptz{}
+	var cursorTS interface{}
 	if cursorCreatedAt != nil {
 		cursorTS = pgtype.Timestamptz{Time: *cursorCreatedAt, Valid: true}
 	}
@@ -490,6 +490,7 @@ func validateDisplayName(name string) *apperror.AppError {
 
 // wrapDBError wraps a database error, preserving context cancellation semantics.
 func wrapDBError(err error, msg string) *apperror.AppError {
+	slog.Error("database error", "msg", msg, "error", err)
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return apperror.Wrap(apperror.CodeCanceled, msg, err)
 	}
