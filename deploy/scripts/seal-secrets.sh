@@ -25,17 +25,22 @@ command -v kubeseal >/dev/null 2>&1 || { echo "ERROR: kubeseal not installed"; e
 
 mkdir -p "$OUTPUT_DIR"
 
+# Strip Windows carriage returns (CRLF → LF) to avoid \r in secret values.
+ENV_CLEAN="$(mktemp)"
+tr -d '\r' < "$ENV_FILE" > "$ENV_CLEAN"
+trap 'rm -f "$ENV_CLEAN"' EXIT
+
 # --- platform-secrets ---
 echo "Sealing platform-secrets..."
 kubectl create secret generic platform-secrets \
   --namespace "$NAMESPACE" \
-  --from-env-file=<(grep -E '^(JWT_SECRET|S3_ACCESS_KEY|S3_SECRET_KEY|GITHUB_OAUTH_SECRET|GOOGLE_OAUTH_SECRET)=' "$ENV_FILE") \
+  --from-env-file=<(grep -E '^(JWT_SECRET|S3_ACCESS_KEY|S3_SECRET_KEY|GITHUB_OAUTH_SECRET|GOOGLE_OAUTH_SECRET)=' "$ENV_CLEAN") \
   --dry-run=client -o yaml \
   | kubeseal --format yaml \
   > "$OUTPUT_DIR/platform-secrets.yaml"
 
 # --- gotrue-jwt-keys (multi-line JWK Set) ---
-JWK_FILE=$(grep '^GOTRUE_JWK_SET_FILE=' "$ENV_FILE" | cut -d= -f2- || true)
+JWK_FILE=$(grep '^GOTRUE_JWK_SET_FILE=' "$ENV_CLEAN" | cut -d= -f2- || true)
 if [[ -n "$JWK_FILE" && -f "$JWK_FILE" ]]; then
   echo "Sealing gotrue-jwt-keys..."
   kubectl create secret generic gotrue-jwt-keys \
@@ -47,7 +52,7 @@ if [[ -n "$JWK_FILE" && -f "$JWK_FILE" ]]; then
 fi
 
 # --- cloudflare-api-token ---
-CF_TOKEN=$(grep '^CLOUDFLARE_API_TOKEN=' "$ENV_FILE" | cut -d= -f2-)
+CF_TOKEN=$(grep '^CLOUDFLARE_API_TOKEN=' "$ENV_CLEAN" | cut -d= -f2-)
 if [[ -n "$CF_TOKEN" ]]; then
   echo "Sealing cloudflare-api-token..."
   kubectl create secret generic cloudflare-api-token \
@@ -59,7 +64,7 @@ if [[ -n "$CF_TOKEN" ]]; then
 fi
 
 # --- discord-webhook ---
-DISCORD_URL=$(grep '^DISCORD_WEBHOOK_URL=' "$ENV_FILE" | cut -d= -f2- || true)
+DISCORD_URL=$(grep '^DISCORD_WEBHOOK_URL=' "$ENV_CLEAN" | cut -d= -f2- || true)
 if [[ -n "$DISCORD_URL" ]]; then
   echo "Sealing discord-webhook..."
   kubectl create secret generic discord-webhook \
@@ -71,8 +76,8 @@ if [[ -n "$DISCORD_URL" ]]; then
 fi
 
 # --- ghcr-pull-secret (container registry auth) ---
-GHCR_USER=$(grep '^GHCR_USERNAME=' "$ENV_FILE" | cut -d= -f2- || true)
-GHCR_TOKEN=$(grep '^GHCR_TOKEN=' "$ENV_FILE" | cut -d= -f2- || true)
+GHCR_USER=$(grep '^GHCR_USERNAME=' "$ENV_CLEAN" | cut -d= -f2- || true)
+GHCR_TOKEN=$(grep '^GHCR_TOKEN=' "$ENV_CLEAN" | cut -d= -f2- || true)
 if [[ -n "$GHCR_USER" && -n "$GHCR_TOKEN" ]]; then
   echo "Sealing ghcr-pull-secret..."
   kubectl create secret docker-registry ghcr-pull-secret \
@@ -86,8 +91,8 @@ if [[ -n "$GHCR_USER" && -n "$GHCR_TOKEN" ]]; then
 fi
 
 # --- r2-backup-creds (CNPG barman S3 backup) ---
-R2_AK=$(grep '^R2_BACKUP_ACCESS_KEY_ID=' "$ENV_FILE" | cut -d= -f2- || true)
-R2_SK=$(grep '^R2_BACKUP_SECRET_ACCESS_KEY=' "$ENV_FILE" | cut -d= -f2- || true)
+R2_AK=$(grep '^R2_BACKUP_ACCESS_KEY_ID=' "$ENV_CLEAN" | cut -d= -f2- || true)
+R2_SK=$(grep '^R2_BACKUP_SECRET_ACCESS_KEY=' "$ENV_CLEAN" | cut -d= -f2- || true)
 if [[ -n "$R2_AK" && -n "$R2_SK" ]]; then
   echo "Sealing r2-backup-creds..."
   kubectl create secret generic r2-backup-creds \
