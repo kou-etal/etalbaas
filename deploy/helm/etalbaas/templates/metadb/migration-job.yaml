@@ -34,8 +34,8 @@ spec:
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.secrets.platformSecretName }}
-                  key: DATABASE_URL
+                  name: {{ .Values.metadb.appSecretName | default "meta-db-app" }}
+                  key: uri
           securityContext:
             {{- include "etalbaas.containerSecurityContext" . | nindent 12 }}
           volumeMounts:
