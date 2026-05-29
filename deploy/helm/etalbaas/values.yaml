@@ -63,7 +63,7 @@ services:
       tag: "v0.1.0"
     replicaCount: null
     resources: {}
-    natsUrl: "nats://nats.etalbaas.svc:4222"
+    natsUrl: "nats://nats.platform-system.svc:4222"
     s3:
       endpoint: ""
       bucket: "etalbaas-storage"
