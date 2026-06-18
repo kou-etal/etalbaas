@@ -115,6 +115,43 @@ spec:
         - protocol: TCP
           port: 8080
 ---
+# Restrict egress from platform-system namespace.
+# Allows: DNS, intra-namespace, project namespaces, and HTTPS (for container registry, K8s API).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: egress-restrict
+  namespace: {{ include "etalbaas.namespace" . }}
+  labels:
+    {{- include "etalbaas.labels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    # DNS
+    - ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # Intra-namespace (platform services communicate with each other)
+    - to:
+        - podSelector: {}
+    # Project namespaces (operator manages project resources)
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              app.kubernetes.io/managed-by: etalbaas-operator
+    # HTTPS outbound (container registry, K8s API server, external OAuth providers)
+    - ports:
+        - protocol: TCP
+          port: 443
+    # PostgreSQL (meta-db, project DBs via CNPG)
+    - ports:
+        - protocol: TCP
+          port: 5432
+---
 # Allow ingress from CNPG operator namespace (manages PostgreSQL clusters).
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
