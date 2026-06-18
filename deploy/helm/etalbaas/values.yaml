@@ -252,8 +252,12 @@ gotrue:
 auth:
   jwt:
     jwksUri: "http://gotrue-dev.platform-system.svc:9999/.well-known/jwks.json"
-    issuer: ""  # Set to GoTrue API_EXTERNAL_URL in production (e.g., "https://auth.example.com")
-    audiences: []  # GoTrue does not set aud claim reliably; skip audience check
+    # SECURITY: Set issuer to GoTrue API_EXTERNAL_URL in production to prevent
+    # token replay attacks (e.g., issuer: "https://auth.example.com").
+    issuer: ""
+    # SECURITY: Configure audiences when GoTrue supports aud claim to restrict
+    # token scope (e.g., audiences: ["etalbaas-dashboard"]).
+    audiences: []
 
 # ─── Observability ───────────────────────────────────────────────────────────
 observability:
