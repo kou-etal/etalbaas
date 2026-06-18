@@ -39,7 +39,10 @@ spec:
   resources:
     {{- toYaml .Values.metadb.internal.resources | nindent 4 }}
 
-  enableSuperuserAccess: true
+  # Security: disable superuser access. The app user is sufficient for normal operations.
+  # Migrations use the app user. If superuser access is needed for debugging,
+  # temporarily set to true via values override.
+  enableSuperuserAccess: false
 
   {{- if .Values.metadb.internal.backup.enabled }}
   backup:
