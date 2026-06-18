@@ -24,12 +24,31 @@ func (s *StaticProvider) GetPool(_ context.Context, _ string) (*pgxpool.Pool, er
 	return s.pool, nil
 }
 
-func (s *StaticProvider) WithRLS(ctx context.Context, _ string, _ json.RawMessage, fn func(pgx.Tx) error) error {
+func (s *StaticProvider) WithRLS(ctx context.Context, _ string, claims json.RawMessage, fn func(pgx.Tx) error) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
+
+	// Apply RLS session variables even in static mode to enforce row-level security.
+	if _, err := tx.Exec(ctx, "SELECT set_config('request.jwt.claims', $1, true)", string(claims)); err != nil {
+		return fmt.Errorf("set jwt claims: %w", err)
+	}
+
+	role := "authenticated"
+	var parsed struct {
+		Role string `json:"role"`
+	}
+	if json.Unmarshal(claims, &parsed) == nil && parsed.Role != "" {
+		role = parsed.Role
+	}
+	if role != "anon" && role != "authenticated" && role != "service_role" {
+		role = "authenticated"
+	}
+	if _, err := tx.Exec(ctx, "SET LOCAL ROLE "+role); err != nil {
+		return fmt.Errorf("set role: %w", err)
+	}
 
 	if err := fn(tx); err != nil {
 		return err
