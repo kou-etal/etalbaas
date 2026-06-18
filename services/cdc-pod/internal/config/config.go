@@ -2,11 +2,15 @@ package config
 
 import (
 	"fmt"
+	"regexp"
 
 	"github.com/caarlos0/env/v11"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 )
+
+// validIdentRe allows only safe PostgreSQL identifier characters.
+var validIdentRe = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
 
 // Config holds all CDC Pod configuration, loaded from environment variables.
 type Config struct {
@@ -31,6 +35,14 @@ func Load() (*Config, error) {
 	cfg := &Config{}
 	if err := env.Parse(cfg); err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
+	}
+	// Validate names used in SQL to prevent injection via replication protocol
+	// (which does not support parameterized queries).
+	if !validIdentRe.MatchString(cfg.SlotName) {
+		return nil, fmt.Errorf("CDC_SLOT_NAME contains invalid characters: %s", cfg.SlotName)
+	}
+	if cfg.PublicationName != "" && !validIdentRe.MatchString(cfg.PublicationName) {
+		return nil, fmt.Errorf("CDC_PUBLICATION_NAME contains invalid characters: %s", cfg.PublicationName)
 	}
 	return cfg, nil
 }
