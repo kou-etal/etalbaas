@@ -43,7 +43,7 @@ func (h *PublicHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if result.ETag != "" {
 		w.Header().Set("ETag", `"`+result.ETag+`"`)
 	}
-	filename := path.Base(objectPath)
+	filename := sanitizeFilename(path.Base(objectPath))
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`inline; filename="%s"`, filename))
 	w.Header().Set("Cache-Control", "public, max-age=3600")
 
