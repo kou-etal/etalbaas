@@ -24,7 +24,7 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 
 function setAuthCookie(session: Session | null) {
   if (session?.access_token) {
-    document.cookie = `etalbaas-auth-token=${session.access_token}; path=/; max-age=${60 * 60 * 24 * 7}; SameSite=Lax`;
+    document.cookie = `etalbaas-auth-token=${session.access_token}; path=/; max-age=${60 * 60 * 24 * 7}; SameSite=Lax; Secure`;
   } else {
     document.cookie = "etalbaas-auth-token=; path=/; max-age=0";
   }
