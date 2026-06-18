@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/kou-etal/etalbaas/pkg/apperror"
 	"github.com/kou-etal/etalbaas/pkg/requestctx"
@@ -46,6 +47,13 @@ func writeAppError(w http.ResponseWriter, err error) {
 		msg = "internal error"
 	}
 	writeError(w, status, msg)
+}
+
+// sanitizeFilename escapes characters that could cause Content-Disposition header injection.
+func sanitizeFilename(name string) string {
+	name = strings.ReplaceAll(name, `\`, `\\`)
+	name = strings.ReplaceAll(name, `"`, `\"`)
+	return name
 }
 
 func appErrorToHTTPStatus(code apperror.Code) int {

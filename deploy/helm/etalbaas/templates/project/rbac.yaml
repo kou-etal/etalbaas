@@ -14,6 +14,8 @@ metadata:
   labels:
     {{- include "etalbaas.serviceLabels" (dict "root" . "component" "project") | nindent 4 }}
 rules:
+  # Secrets: cluster-wide because project-ms manages secrets in per-project namespaces.
+  # TODO: migrate to per-namespace Roles created dynamically by the operator.
   - apiGroups: [""]
     resources: ["secrets"]
     verbs: ["get", "list", "create", "update", "delete"]

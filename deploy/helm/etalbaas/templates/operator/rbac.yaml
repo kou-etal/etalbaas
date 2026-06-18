@@ -25,9 +25,14 @@ rules:
   - apiGroups: [""]
     resources: ["namespaces"]
     verbs: ["get", "list", "watch", "create", "update", "delete"]
-  # Core resources
+  # Core resources (non-sensitive)
   - apiGroups: [""]
-    resources: ["services", "configmaps", "secrets", "pods"]
+    resources: ["services", "configmaps", "pods"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Secrets: cluster-wide because operator manages secrets in project-* namespaces.
+  # TODO: migrate to per-namespace Roles created dynamically by the operator.
+  - apiGroups: [""]
+    resources: ["secrets"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: [""]
     resources: ["resourcequotas", "limitranges"]

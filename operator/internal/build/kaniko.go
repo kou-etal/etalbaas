@@ -3,6 +3,8 @@ package build
 import (
 	"crypto/sha256"
 	"fmt"
+	"net"
+	"net/url"
 	"regexp"
 	"strings"
 
@@ -18,6 +20,9 @@ import (
 // validGitPathRe allows only safe characters in git subdirectory paths.
 var validGitPathRe = regexp.MustCompile(`^[a-zA-Z0-9._/\-]+$`)
 
+// validGitRefRe allows only safe characters in git branch/tag references.
+var validGitRefRe = regexp.MustCompile(`^[a-zA-Z0-9._/\-]+$`)
+
 // validateGitPath rejects paths that could lead to shell injection.
 func validateGitPath(p string) error {
 	if strings.Contains(p, "..") {
@@ -25,6 +30,63 @@ func validateGitPath(p string) error {
 	}
 	if !validGitPathRe.MatchString(p) {
 		return fmt.Errorf("git path contains invalid characters: %s", p)
+	}
+	return nil
+}
+
+// validateGitRepo ensures the repo URL is HTTPS and does not point to internal networks.
+func validateGitRepo(repo string) error {
+	u, err := url.Parse(repo)
+	if err != nil {
+		return fmt.Errorf("invalid git repo URL: %w", err)
+	}
+	if u.Scheme != "https" {
+		return fmt.Errorf("git repo must use https:// scheme, got %q", u.Scheme)
+	}
+	hostname := u.Hostname()
+	if hostname == "" {
+		return fmt.Errorf("git repo URL has no hostname")
+	}
+
+	// Reject well-known internal/metadata hostnames.
+	blocked := []string{
+		"metadata.google.internal",
+		"169.254.169.254",
+		"metadata.internal",
+		"kubernetes.default",
+		"kubernetes.default.svc",
+		"localhost",
+		"127.0.0.1",
+		"[::1]",
+	}
+	lower := strings.ToLower(hostname)
+	for _, b := range blocked {
+		if lower == b {
+			return fmt.Errorf("git repo URL points to blocked host: %s", hostname)
+		}
+	}
+	// Reject .svc and .internal suffixes (Kubernetes internal services).
+	if strings.HasSuffix(lower, ".svc") || strings.HasSuffix(lower, ".svc.cluster.local") || strings.HasSuffix(lower, ".internal") {
+		return fmt.Errorf("git repo URL points to internal service: %s", hostname)
+	}
+
+	// Reject private/link-local IP ranges.
+	if ip := net.ParseIP(hostname); ip != nil {
+		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+			return fmt.Errorf("git repo URL points to private/internal IP: %s", hostname)
+		}
+	}
+
+	return nil
+}
+
+// validateGitRef ensures the git ref contains only safe characters.
+func validateGitRef(ref string) error {
+	if ref == "" || ref == "HEAD" {
+		return nil
+	}
+	if !validGitRefRe.MatchString(ref) {
+		return fmt.Errorf("git ref contains invalid characters: %s", ref)
 	}
 	return nil
 }
@@ -276,8 +338,14 @@ func buildInitContainers(fn *etalbaasv1alpha1.Function) ([]corev1.Container, err
 			return []corev1.Container{dockerfileCopyInitContainer()}, nil
 		}
 		git := source.Git
+		if err := validateGitRepo(git.Repo); err != nil {
+			return nil, err
+		}
 		ref := "HEAD"
 		if git.Ref != "" {
+			if err := validateGitRef(git.Ref); err != nil {
+				return nil, err
+			}
 			ref = git.Ref
 		}
 		// Use git clone with explicit argument separation to avoid shell injection.

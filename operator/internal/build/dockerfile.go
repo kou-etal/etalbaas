@@ -55,10 +55,37 @@ func GenerateDockerfile(preset string, requirements []string, customDockerfile s
 		if customDockerfile == "" {
 			return "", fmt.Errorf("custom preset requires a Dockerfile")
 		}
+		if err := validateCustomDockerfile(customDockerfile); err != nil {
+			return "", err
+		}
 		return customDockerfile, nil
 	default:
 		return "", fmt.Errorf("unsupported runtime preset: %s", preset)
 	}
+}
+
+const maxCustomDockerfileSize = 10 * 1024 // 10 KB
+
+// validateCustomDockerfile performs basic safety checks on user-provided Dockerfiles.
+// Note: Pod SecurityContext enforces runAsNonRoot + runAsUser=65532, so even if
+// the Dockerfile does not set USER, the container runs as non-root.
+func validateCustomDockerfile(content string) error {
+	if len(content) > maxCustomDockerfileSize {
+		return fmt.Errorf("custom Dockerfile exceeds maximum size of %d bytes", maxCustomDockerfileSize)
+	}
+	// Must contain at least one FROM instruction.
+	hasFrom := false
+	for _, line := range strings.Split(content, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(strings.ToUpper(trimmed), "FROM ") {
+			hasFrom = true
+			break
+		}
+	}
+	if !hasFrom {
+		return fmt.Errorf("custom Dockerfile must contain a FROM instruction")
+	}
+	return nil
 }
 
 func pythonDockerfile(version string, requirements []string, ml bool) string {

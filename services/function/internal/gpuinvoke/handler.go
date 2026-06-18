@@ -121,7 +121,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	jobName, resultCMName, err := h.createDispatcherJob(ctx, fnSpec, invocationID, body)
 	if err != nil {
 		slog.Error("failed to create dispatcher job", "error", err, "function", funcName)
-		http.Error(w, "failed to create GPU dispatch job: "+err.Error(), http.StatusInternalServerError)
+		http.Error(w, "internal error: failed to create GPU dispatch job", http.StatusInternalServerError)
 		return
 	}
 
@@ -130,7 +130,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Watch Job completion.
 	if err := h.waitForJobCompletion(ctx, jobName); err != nil {
 		slog.Error("job watch failed", "error", err, "job", jobName)
-		http.Error(w, "GPU job failed or timed out: "+err.Error(), http.StatusBadGateway)
+		http.Error(w, "GPU job failed or timed out", http.StatusBadGateway)
 		return
 	}
 
@@ -138,7 +138,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	result, err := h.readAndCleanupResult(ctx, resultCMName)
 	if err != nil {
 		slog.Error("failed to read result", "error", err, "configmap", resultCMName)
-		http.Error(w, "failed to read GPU job result: "+err.Error(), http.StatusInternalServerError)
+		http.Error(w, "internal error: failed to read GPU job result", http.StatusInternalServerError)
 		return
 	}
 

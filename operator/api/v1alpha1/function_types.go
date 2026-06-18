@@ -135,9 +135,13 @@ type FunctionResources struct {
 }
 
 // SandboxSpec defines the sandbox configuration for function execution.
+// These fields are platform-enforced and should not be overridden by users.
+// A validating webhook should be added to prevent user modification in production.
 type SandboxSpec struct {
 	// RuntimeClass is the Kubernetes RuntimeClass to use.
+	// Platform-enforced: only allowed values are "gvisor" (default) or empty (no sandbox).
 	// +kubebuilder:default="gvisor"
+	// +kubebuilder:validation:Enum=gvisor;""
 	RuntimeClass string `json:"runtimeClass,omitempty"`
 
 	// ReadOnlyRootFilesystem enforces a read-only root filesystem.
