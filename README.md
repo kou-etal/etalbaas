@@ -316,57 +316,6 @@ All services expose [Connect RPC](https://connectrpc.com/) APIs defined in Proto
 
 Proto definitions are in `proto/etalbaas/` and code is generated with `buf generate`.
 
-## Roadmap
-
-### Phase 1 — MVP (Current)
-
-- [x] Multi-tenant project provisioning (CloudNativePG + PostgREST + Redis per tenant)
-- [x] Connect RPC microservices (Gateway, Tenant-User, Project, Function, Event, Storage)
-- [x] Kubernetes Operator with Project and Function CRDs
-- [x] GoTrue-based authentication (developer + end-user)
-- [x] Serverless functions (heavy-job, heavy-deployment, light-deployment)
-- [x] Event triggers (HTTP, database change, object storage)
-- [x] S3-compatible object storage with tenant isolation
-- [x] Dashboard (Next.js)
-- [x] Helm chart for self-host deployment
-- [x] ArgoCD GitOps (App of Apps)
-- [x] gVisor sandbox isolation for functions
-- [x] KEDA-based scale-to-zero
-- [x] CI/CD with image signing (Cosign) and vulnerability scanning (Trivy)
-- [ ] GPU provider integration (RunPod, Lambda Labs, Sakura, self-managed)
-- [ ] Cron triggers
-
-### Phase 2+
-
-- Pro / Enterprise billing plans (Stripe integration)
-- Client SDKs (TypeScript, Python, Go)
-- Realtime: Broadcast and Presence
-- Additional storage providers (AWS S3, GCS, Azure Blob)
-- Multi-region support
-- Custom domains (Pro plan)
-- Shared CDC pool (for 100+ tenants)
-- Multi-DB support (MongoDB, ClickHouse)
-- DLQ (Dead Letter Queue) for failed events
-
-## Contributing
-
-Contributions are welcome! Please follow these guidelines:
-
-- **Commit format**: [Conventional Commits](https://www.conventionalcommits.org/) (e.g., `feat(operator):`, `fix(gateway):`)
-- **Branch naming**: `<prefix>/<issue-number>-<description>` (e.g., `feat/42-add-gpu-dispatch`)
-- **Before submitting**: Run tests and lint for all affected packages
-  ```bash
-  # Go tests
-  cd services/<name> && go test ./...
-
-  # Proto lint
-  cd proto && buf lint
-
-  # Helm lint
-  helm lint deploy/helm/etalbaas/
-  ```
-- **Architecture**: See `docs/architecture.md` for design decisions and rationale
-
 ## License
 
 [Apache License 2.0](LICENSE)
